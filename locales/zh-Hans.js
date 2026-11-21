@@ -137,6 +137,9 @@ window.TERRAPOP.locales["zh-Hans"] = {
   "summary.total": "题量",
   "summary.accuracy": "正确率",
   "summary.bestCombo": "最高连击",
+  "summary.time": "总耗时",
+  "summary.timeFmt": "{m} 分 {s} 秒",
+  "summary.secFmt": "{s} 秒",
 
   "type.province": "省",
   "type.autonomous": "自治区",

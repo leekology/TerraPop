@@ -134,6 +134,9 @@ window.TERRAPOP.locales.en = {
   "summary.total": "Questions",
   "summary.accuracy": "Accuracy",
   "summary.bestCombo": "Best combo",
+  "summary.time": "Total time",
+  "summary.timeFmt": "{m}m {s}s",
+  "summary.secFmt": "{s}s",
 
   "type.province": "Province",
   "type.autonomous": "Autonomous region",

@@ -331,7 +331,7 @@ for (const f of ["js/app.js", "js/game.js", "js/map.js"]) {
 "capital seat none".split(" ").forEach(k => usedKeys.add("term." + k));
 "province autonomous municipality sar".split(" ").forEach(k => usedKeys.add("type." + k));
 "north northeast east central south southwest northwest".split(" ").forEach(g => usedKeys.add("group." + g));
-"score correct total accuracy bestCombo title".split(" ").forEach(k => usedKeys.add("summary." + k));
+"score correct total accuracy bestCombo title time timeFmt secFmt".split(" ").forEach(k => usedKeys.add("summary." + k));
 "all provincesOnly noMunicipality".split(" ").forEach(k => usedKeys.add("scope." + k));
 
 const missingI18n = [...usedKeys].filter(k => !zh[k]);

@@ -110,15 +110,18 @@ locales/*  ──┘
 .tp-panel
   .tp-panel-head        题号 / 计时 / 连击 / 得分 / 正确率
   .tp-progress-bar      进度
-  .tp-prev              上一题卡片：flex:1、固定高度、内部滚动（第一题显示玩法说明）
-  .tp-current           当前题：固定高度 --block-h
-    .tp-current-head    已知信息 + 题面（各固定行高）
-    .tp-hints           提示（固定行高，没有提示也占位，避免跳动）
-    .tp-answer          作答区：固定高度 176px、固定位置
+  .tp-prev              上一题卡片：flex: 0 1 var(--prev-h)（232px）、内部滚动
+                        （第一题显示玩法说明）
+  .tp-current           当前题：固定高度 --block-h（312px）、margin-top: auto 钉在底部
+    .tp-current-head    已知信息（32px）+ 题面（32px，22px 加粗）
+    .tp-hints           提示（26px，没有提示也占位，避免跳动）
+    .tp-answer          作答区：固定高度 200px、固定位置
 ```
 
-`.tp-current` 的子元素高度全部固定，所以作答区的屏幕坐标在整局里完全不变；
+`.tp-current` 的子元素高度全部固定，并且被 `margin-top: auto` 钉在侧栏底部，
+所以作答区的屏幕坐标在整局里完全不变（上一题卡片内容长短都影响不到它）；
 端到端测试会在连续 6 题里断言这个坐标逐像素一致。
+短视口（`max-height: 760px / 680px`）会按档位调小 `--block-h` 与 `--prev-h`，保证不溢出。
 
 ### `TERRAPOP.countries.cn`（`data/cn.js`）
 

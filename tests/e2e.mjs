@@ -95,6 +95,10 @@ check("上方卡片里是说明文字而不是答案", (await page.textContent("
 check("当前题给出已知信息", (await page.textContent("#knownChip")).includes("已在地图上圈出"));
 check("题面就是当前要答的维度", (await page.textContent("#askText")).includes("全称"));
 check("作答区就是填空控件", (await page.locator("#answerArea .tp-answer-input").count()) === 1);
+const askSize = await page.$eval("#askText", el => parseFloat(getComputedStyle(el).fontSize));
+const prevH = (await page.locator("#prevCard").boundingBox()).height;
+check("题面字号够大、够显眼", askSize >= 20, askSize + "px");
+check("上一题卡片被压矮，不抢戏", prevH <= 264, Math.round(prevH) + "px");
 await page.screenshot({ path: path.join(shots, "02-play.png") });
 
 // ── 3. 零阻断：答完立刻换下一题 ──────────────────────────────
@@ -362,10 +366,38 @@ for (const style of ["text", "choice3", "choice4"]) {
 check(`12 组合 × 3 作答方式 = ${combos} 种配置都能出题、零阻断作答、信息回填`, problems.length === 0,
   problems.slice(0, 6).join(" | "));
 
-// ── 12. 移动端 ───────────────────────────────────────────────
-section("12. 移动端布局");
+// ── 12. 结算 ─────────────────────────────────────────────────
+section("12. 结算：含总耗时");
+if (!(await page.isHidden("#screenPlay"))) await page.click("#btnQuit");
+await page.waitForTimeout(150);
+if (await page.isHidden("#screenHome")) { await page.click("#btnHome"); await page.waitForTimeout(150); }
+await pickChip("scopeChips", "group:north");
+await pickChip("knownChips", "location");
+await pickChip("askedChips", "full");
+await pickChip("styleChips", "text");
+await page.click("#btnStart");
+await page.waitForTimeout(200);
+for (let i = 0; i < 12; i++) {
+  if (await page.isHidden("#screenPlay")) break;      // 题答完了，结算页已经出现
+  const inp = page.locator("#answerArea .tp-answer-input");
+  if (!(await inp.isVisible())) break;
+  await inp.fill("跳过");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(70);
+}
+await page.waitForSelector("#screenSummary:not([hidden])", { timeout: 8000 });
+const cells = await page.$$eval("#summaryBody .tp-summary-cell", els => els.map(e => e.textContent.trim()));
+check("结算有 6 项", cells.length === 6, cells.join(" | "));
+check("最后一项是总耗时且带单位", /总耗时|Total time/.test(cells[5]) && /秒|s$|s\b/.test(cells[5]), cells[5]);
+await page.screenshot({ path: path.join(shots, "12-summary.png") });
+
+// ── 13. 移动端 ───────────────────────────────────────────────
+section("13. 移动端布局");
+await page.click("#btnHome");
+await page.waitForTimeout(150);
 await page.setViewportSize({ width: 390, height: 844 });
 await page.waitForTimeout(250);
+await pickChip("scopeChips", "all");
 await pickChip("knownChips", "location");
 await pickChip("askedChips", "full");
 await pickChip("styleChips", "text");
@@ -376,10 +408,10 @@ const panelBox = await page.locator(".tp-panel").boundingBox();
 check("地图与侧栏在窄屏下纵向堆叠", panelBox.y >= mapBox.y + mapBox.height - 2,
   `map ${Math.round(mapBox.y)}+${Math.round(mapBox.height)} → panel ${Math.round(panelBox.y)}`);
 check("窄屏下作答区仍然可用", (await answerBox()).height > 100);
-await page.screenshot({ path: path.join(shots, "12-mobile.png") });
+await page.screenshot({ path: path.join(shots, "13-mobile.png") });
 
-// ── 13. 无报错 ───────────────────────────────────────────────
-section("13. 运行期无报错");
+// ── 14. 无报错 ───────────────────────────────────────────────
+section("14. 运行期无报错");
 check("没有 console error / pageerror / 资源加载失败", errors.length === 0, errors.slice(0, 4).join(" | "));
 
 await browser.close();

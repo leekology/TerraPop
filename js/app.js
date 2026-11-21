@@ -62,7 +62,8 @@
     timerHandle: null,
     globalDeadline: 0,
     mapGen: 0,
-    beatPending: false
+    beatPending: false,
+    startedAt: 0
   };
 
   var el = {};
@@ -93,6 +94,13 @@
   function boardValue(region, dim) {
     if (dim === "short") return T.game.shortDisplay(region, settings.locale);
     return T.game.displayFor(region, dim, settings.locale);
+  }
+
+  /** 把毫秒格式化成「2 分 13 秒」/「13 秒」 */
+  function formatDuration(ms) {
+    var total = Math.max(0, Math.round((ms || 0) / 1000));
+    var m = Math.floor(total / 60), s = total % 60;
+    return m > 0 ? t("summary.timeFmt", { m: m, s: s }) : t("summary.secFmt", { s: s });
   }
 
   // ── 音效 ─────────────────────────────────────────────────────
@@ -331,6 +339,7 @@
 
     state.lastResult = null;
     state.beatPending = false;
+    state.startedAt = Date.now();
     state.globalDeadline = settings.timer === "global" ? Date.now() + 60000 : 0;
 
     el.mapLegend.hidden = !settings.showLegend;
@@ -687,12 +696,14 @@
     stopTimer();
     showScreen("summary");
     var s = state.session;
+    var elapsed = state.startedAt ? Date.now() - state.startedAt : 0;
     var cells = [
       ["summary.score", s.score],
       ["summary.correct", s.correctCount],
       ["summary.total", s.answeredCount],
       ["summary.accuracy", (s.answeredCount ? Math.round(s.accuracy() * 100) : 0) + "%"],
-      ["summary.bestCombo", s.bestCombo]
+      ["summary.bestCombo", s.bestCombo],
+      ["summary.time", formatDuration(elapsed)]
     ];
     U.clear(el.summaryBody);
     cells.forEach(function (c) {

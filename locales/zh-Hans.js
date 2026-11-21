@@ -20,10 +20,25 @@ window.TERRAPOP.locales["zh-Hans"] = {
   "config.note": "四个信息（全称 / 简称 / 省会 / 位置）两两组合共 12 种，任意一种都配得出来；再叠加作答方式就是完整的玩法矩阵。",
   "config.empty": "这个组合下没有可出的题，换一个试试。",
 
+  "mode.title": "模式",
+  "mode.random": "随机一轮",
+  "mode.random.desc": "范围内的省份随机排一轮，全部答完就结束。最常规的一档。",
+  "mode.adjacency": "邻接漫游",
+  "mode.adjacency.desc": "按地图接壤一路挨着出题：答完广东接着广西、云南……像在地图上走一圈。",
+  "mode.timed": "1 分钟极速",
+  "mode.timed.desc": "60 秒内答得越多越好，时间到立刻结算。答错不回头，冲就完事。",
+  "mode.perfect": "全答对为止",
+  "mode.perfect.desc": "答错的题会排到队尾再来一遍，直到范围内每一省都答对才结束。",
+
   "scope.title": "范围",
-  "scope.all": "全部 34 个",
-  "scope.provincesOnly": "只含 23 个省",
-  "scope.noMunicipality": "排除直辖市与港澳台",
+  "scope.groups": "大区",
+  "scope.types": "类型",
+  "scope.presetAll": "全部 34 个",
+  "scope.presetProvince": "只含 23 个省",
+  "scope.presetNoMunicipality": "排除直辖市与港澳台",
+  "scope.selectAllGroups": "大区全选",
+  "scope.clearGroups": "大区清空",
+  "scope.empty": "当前选择里没有可出的省份，先勾几个大区。",
 
   "group.north": "华北",
   "group.northeast": "东北",
@@ -66,16 +81,20 @@ window.TERRAPOP.locales["zh-Hans"] = {
 
   "input.placeholder": "输入你的答案",
   "input.smartPlaceholder": "输入答案，或拼音首字母（如 sjz）",
-  "input.smartHint": "支持拼音与首字母，无歧义时自动判定",
-  "input.ambiguous": "{n} 个候选，点一个或继续输入",
+  "input.smartHint": "支持拼音与首字母；唯一命中正确答案时自动判定，否则按回车确定",
+  "input.keyHint": "↑↓ 选择候选 · 回车确定",
+
+  "progress.question": "第 {n} 题",
+  "progress.perfect": "第 {n} 题 · 已答对 {solved}/{total}",
 
   // ── 上一题卡片 ──
   "prev.title": "上一题",
   "prev.explainTitle": "怎么玩",
-  "prev.explainBody": "系统给出四个信息里的一个，你只要答出另一个。位置题直接点地图，其余题可以填也可以选；填的时候支持拼音和拼音首字母，输入到没有歧义就自动判对。答完这一题的信息和百科会出现在这张卡片里，下面立刻换成下一题——位置固定、不打断，连击越高分越高。",
+  "prev.explainBody": "上面会留着上一题的信息和百科，第一题时这里是说明。玩法：系统给出四个信息里的一个，你只要答出另一个。位置题直接点地图，其余题可以填也可以选。填空时支持拼音和拼音首字母，出现多个候选就用 ↑↓ 选、回车确定；只有唯一命中正确答案时才会自动判定，填错不会自动提交，放心改。答完立刻换下一题——位置固定、不阻断，连击越高分越高。",
   "prev.none": "还没答过题",
   "prev.yourAnswer": "你答的是",
   "prev.unknown": "未作答",
+  "prev.requeued": "这题答错了，稍后会再出现一次",
 
   "action.submit": "确定",
   "action.skip": "跳过",

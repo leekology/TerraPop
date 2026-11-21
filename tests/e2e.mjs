@@ -95,13 +95,52 @@ async function leaveGame() {
 }
 const answerBox = () => page.locator("#answerArea").boundingBox();
 
+async function setToggle(hostId, value, on) {
+  await page.evaluate(([h, v, o]) => {
+    const i = document.querySelector(`#${h} input[value="${v}"]`);
+    if (!i || i.checked === o) return;
+    i.checked = o;
+    i.dispatchEvent(new Event("change", { bubbles: true }));
+  }, [hostId, value, on]);
+  await page.waitForTimeout(35);
+}
+let ALL_GROUPS = [], ALL_TYPES = [];
+async function loadScopeLists() {
+  ALL_GROUPS = await page.$$eval("#scopeGroupChips input", els => els.map(e => e.value));
+  ALL_TYPES = await page.$$eval("#scopeTypeChips input", els => els.map(e => e.value));
+}
+async function setScope(groups, types) {
+  for (const g of ALL_GROUPS) await setToggle("scopeGroupChips", g, groups.includes(g));
+  for (const ty of ALL_TYPES) await setToggle("scopeTypeChips", ty, types.includes(ty));
+}
+async function setScopeAll() {
+  await setScope(await page.$$eval("#scopeGroupChips input", e => e.map(x => x.value)),
+                 await page.$$eval("#scopeTypeChips input", e => e.map(x => x.value)));
+}
+
 // ── 1. 首页 ──────────────────────────────────────────────────
 section("1. 首页：玩法矩阵配置");
 check("已知 / 要猜 / 作答方式各 5 个选项",
   (await page.locator("#knownChips .tp-chip").count()) === 5 &&
   (await page.locator("#askedChips .tp-chip").count()) === 5 &&
   (await page.locator("#styleChips .tp-chip").count()) === 5);
-check("范围 10 个选项", (await page.locator("#scopeChips .tp-chip").count()) === 10);
+check("模式 4 个选项", (await page.locator("#modeChips .tp-chip").count()) === 4);
+check("模式说明会跟着变", (await page.textContent("#modeDesc")).length > 6);
+check("范围：大区 7 个多选项", (await page.locator("#scopeGroupChips .tp-chip").count()) === 7);
+check("范围：类型 4 个多选项", (await page.locator("#scopeTypeChips .tp-chip").count()) === 4);
+check("范围：3 个预设 + 大区全选/清空", (await page.locator("#scopePresets button").count()) === 5);
+await loadScopeLists();
+check("默认全选，覆盖 34 个", /34/.test(await page.textContent("#homeRegionCount")), await page.textContent("#homeRegionCount"));
+// 多选：只留华北，再取消直辖市 → 3 个（河北/山西/内蒙古）
+await setScope(["north"], ALL_TYPES);
+check("大区多选：只选华北 = 5 个", /5/.test(await page.textContent("#homeRegionCount")), await page.textContent("#homeRegionCount"));
+await setToggle("scopeTypeChips", "municipality", false);
+check("大区 × 类型 自由组合：华北去掉直辖市 = 3 个", /3/.test(await page.textContent("#homeRegionCount")), await page.textContent("#homeRegionCount"));
+await setScope([], ALL_TYPES);
+check("一个大区都不选时提示为空且不能开局",
+  !(await page.isEnabled("#btnStart")), await page.textContent("#homeRegionCount"));
+await setScopeAll();
+check("恢复全选后又能开局", await page.isEnabled("#btnStart"));
 await page.screenshot({ path: path.join(shots, "01-home.png") });
 
 // ── 1b. 左上角返回：进行中先确认 ─────────────────────────────
@@ -251,6 +290,99 @@ check("拼音声调字符（Latin Extended-B）只用一种字体，一个音节
 console.log(`    · 汉字字体：${hanFonts.join(",")}；拼音/拉丁字体：${toneFonts.join(",")}`);
 await page.evaluate(() => { const d = document.getElementById("tpFontProbe"); if (d) d.remove(); });
 await page.screenshot({ path: path.join(shots, "03-after-answer.png") });
+
+// ── 3b. 填错不自动提交，回车才确定 ──────────────────────────
+section("3b. 填空：填错不会自动提交，回车才确定");
+await page.waitForTimeout(2200);   // 等上一题的答案画面退场、本题高亮就位
+const tgt3 = await page.evaluate(() => {
+  const d = document.querySelector("#mapHost .tp-marks .tp-mark").getAttribute("d");
+  return TERRAPOP.maps.cn.regions.find(x => x.d === d).id;
+});
+const wrongUnique = await page.evaluate(tid => {
+  const all = TERRAPOP.countries.cn.regions;
+  for (const r of all) {
+    if (r.id === tid) continue;
+    const ini = TERRAPOP.util.initialsOf(r.names["zh-Hans"]);
+    if (!ini || ini.length < 2) continue;
+    const m = TERRAPOP.game.matchInput(all, "full", "zh-Hans", ini);
+    if (m.kind === "exact" && m.candidates.length === 1 && m.candidates[0] === r.id) {
+      return { ini: ini, name: r.names["zh-Hans"] };
+    }
+  }
+  return null;
+}, tgt3);
+check("能构造一个「唯一但答错」的输入", !!wrongUnique, JSON.stringify(wrongUnique));
+
+const headPre = await head();
+await page.locator("#answerArea .tp-answer-input").fill(wrongUnique.ini);
+await page.waitForTimeout(250);
+check("唯一但答的是别的省 → 不自动提交，还停在本题",
+  (await head()) === headPre && (await page.isVisible("#answerArea .tp-answer-input")),
+  `题号 ${headPre} → ${await head()}`);
+check("输入框仍可编辑，方便改", await page.evaluate(() => {
+  const i = document.querySelector("#answerArea .tp-answer-input");
+  return !!i && !i.disabled && i.value.length > 0;
+}));
+await page.keyboard.press("Enter");
+await page.waitForTimeout(200);
+check("按回车才提交，并判为答错", (await head()) !== headPre && /答错|Wrong/.test((await prevInfo()).verds),
+  (await prevInfo()).verds);
+
+// ── 3c. 多候选：↑↓ 选择，回车提交 ────────────────────────────
+section("3c. 同音多候选：↑↓ 选择，回车提交");
+await page.waitForTimeout(2200);
+const ambQ = await page.evaluate(() => {
+  const all = TERRAPOP.countries.cn.regions;
+  for (const q of ["h", "hb", "hn", "j", "ji", "s", "sh", "g", "n", "z", "l", "f", "y", "x", "d", "t"]) {
+    const m = TERRAPOP.game.matchInput(all, "full", "zh-Hans", q);
+    if (m.kind === "multi" && m.candidates.length >= 2) return { q: q, n: m.candidates.length };
+  }
+  return null;
+});
+check("能构造一个多候选输入", !!ambQ, JSON.stringify(ambQ));
+
+const input3c = page.locator("#answerArea .tp-answer-input");
+await input3c.fill(ambQ.q);
+await page.waitForTimeout(180);
+const nSug = await page.locator("#suggest .tp-suggest-item").count();
+check("出现多个候选", nSug >= 2, `${nSug} 个`);
+check("界面上提示了 ↑↓ 选择、回车确定", /↑↓/.test(await page.textContent("#suggest")),
+  await page.textContent("#suggest"));
+check("多候选时不会硬判", await page.isVisible("#answerArea .tp-answer-input"));
+
+await input3c.focus();
+await page.keyboard.press("ArrowDown");
+await page.waitForTimeout(60);
+check("第一次按 ↓ 高亮第一个候选", await page.evaluate(() => {
+  const items = [...document.querySelectorAll("#suggest .tp-suggest-item")];
+  return document.querySelector("#suggest .tp-suggest-item-active") === items[0];
+}));
+await page.keyboard.press("ArrowUp");
+await page.waitForTimeout(60);
+check("按 ↑ 会回绕到最后一个候选", await page.evaluate(() => {
+  const items = [...document.querySelectorAll("#suggest .tp-suggest-item")];
+  return document.querySelector("#suggest .tp-suggest-item-active") === items[items.length - 1];
+}));
+
+// 走到第 2 个候选，记下它的文本，回车应当提交它（而不是输入框里的字母）
+const pickIdx = Math.min(1, nSug - 1);
+await page.keyboard.press("ArrowDown");   // 从最后回绕到第一个
+await page.waitForTimeout(40);
+for (let i = 0; i < pickIdx; i++) { await page.keyboard.press("ArrowDown"); await page.waitForTimeout(30); }
+const pickedText = await page.evaluate(() => {
+  const a = document.querySelector("#suggest .tp-suggest-item-active");
+  return a ? a.textContent.trim() : null;
+});
+check("方向键能高亮指定候选", !!pickedText, String(pickedText));
+
+const head3c = await head();
+await page.keyboard.press("Enter");
+await page.waitForTimeout(200);
+const p3c = await prevInfo();
+const your3c = await page.textContent("#prevCard .tp-prev-your");
+check("回车提交的是高亮候选（而不是输入框里的原文）",
+  (await head()) !== head3c && your3c.includes(pickedText),
+  `${your3c}`);
 
 // ── 4. 位置固定 ──────────────────────────────────────────────
 section("4. 位置固定：多题之间作答区坐标完全一致");
@@ -469,12 +601,110 @@ for (const style of ["text", "choice3", "choice4"]) {
 check(`12 组合 × 3 作答方式 = ${combos} 种配置都能出题、零阻断作答、信息回填`, problems.length === 0,
   problems.slice(0, 6).join(" | "));
 
-// ── 12. 结算 ─────────────────────────────────────────────────
-section("12. 结算：含总耗时");
+// ── 12. 四种模式 ─────────────────────────────────────────────
+section("12. 四种模式：邻接 / 极速 / 全答对");
+await page.selectOption("#langSelect", "zh-Hans");
+await page.waitForTimeout(200);
+await setScopeAll();
+await pickChip("knownChips", "short");
+await pickChip("askedChips", "full");
+await pickChip("styleChips", "text");
+
+// 建一个「简称 → 省份 id」的索引，方便按题面作答
+await page.evaluate(() => {
+  window.__shortIdx = {};
+  for (const r of TERRAPOP.countries.cn.regions) {
+    window.__shortIdx[TERRAPOP.game.shortDisplay(r, "zh-Hans")] = r.id;
+  }
+});
+async function currentByShort() {
+  return page.evaluate(() => {
+    const b = document.querySelector("#knownChip b");
+    return b ? (window.__shortIdx[b.textContent.trim()] || null) : null;
+  });
+}
+
+// 12a 邻接漫游
+await pickChip("modeChips", "adjacency");
+check("模式说明切到邻接漫游", /接壤/.test(await page.textContent("#modeDesc")), await page.textContent("#modeDesc"));
+await page.click("#btnStart");
+await page.waitForTimeout(300);
+const seq = [];
+for (let i = 0; i < 9; i++) {
+  const sid = await currentByShort();
+  if (!sid) break;
+  seq.push(sid);
+  const full = await page.evaluate(id => TERRAPOP.countries.cn.regions.find(r => r.id === id).fullNames["zh-Hans"], sid);
+  await page.locator("#answerArea .tp-answer-input").fill(full);
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(90);
+}
+check("邻接模式能连续出题", seq.length >= 6, `出了 ${seq.length} 题`);
+const adjOk = await page.evaluate(list => {
+  const adj = TERRAPOP.map.buildAdjacency(TERRAPOP.maps.cn, 1.6, 160);
+  let n = 0;
+  for (let i = 1; i < list.length; i++) if ((adj[list[i - 1]] || []).includes(list[i])) n++;
+  return { n: n, total: list.length - 1 };
+}, seq);
+check("邻接模式下相邻两题大多是真的接壤", adjOk.n >= Math.floor(adjOk.total * 0.6),
+  `${adjOk.n}/${adjOk.total}`);
+
+// 12b 1 分钟极速
+await leaveGame();
+await pickChip("modeChips", "timed");
+check("模式说明切到 1 分钟极速", /60 秒|60 秒内/.test(await page.textContent("#modeDesc")), await page.textContent("#modeDesc"));
+await page.click("#btnStart");
+await page.waitForTimeout(300);
+check("极速模式显示倒计时", (await page.isVisible("#qTimer")) && /\d+s/.test(await page.textContent("#qTimer")),
+  await page.textContent("#qTimer"));
+const headT = await head();
+await page.locator("#answerArea .tp-answer-input").fill("随便写");
+await page.keyboard.press("Enter");
+await page.waitForTimeout(200);
+check("极速模式答完继续出题、不会立刻结束",
+  (await head()) !== headT && !(await page.isHidden("#screenPlay")));
+
+// 12c 全答对为止（缩到华北的 2 个省）
+await leaveGame();
+await pickChip("modeChips", "perfect");
+await setScope(["north"], ["province"]);
+await page.click("#btnStart");
+await page.waitForTimeout(300);
+check("全答对模式：题号里显示已答对数", /已答对/.test(await head()), await head());
+check("范围缩小后总数为 2", /\/ ?2/.test(await head()), await head());
+await page.locator("#answerArea .tp-answer-input").fill("一定答错");
+await page.keyboard.press("Enter");
+await page.waitForTimeout(200);
+check("答错时卡片提示「稍后会再出现」", /再出现/.test(await page.textContent("#prevCard")));
+check("全答对模式：答错不会结束本局", !(await page.isHidden("#screenPlay")));
+for (let i = 0; i < 12; i++) {
+  if (await page.isHidden("#screenPlay")) break;
+  const sid = await currentByShort();
+  if (!sid) break;
+  const full = await page.evaluate(id => TERRAPOP.countries.cn.regions.find(r => r.id === id).fullNames["zh-Hans"], sid);
+  await page.locator("#answerArea .tp-answer-input").fill(full);
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(120);
+}
+await page.waitForSelector("#screenSummary:not([hidden])", { timeout: 8000 });
+const sumMap = await page.evaluate(() => {
+  const out = {};
+  document.querySelectorAll("#summaryBody .tp-summary-cell").forEach(c => {
+    out[c.querySelector("em").textContent.trim()] = c.querySelector("b").textContent.trim();
+  });
+  return out;
+});
+check("全答对模式：2 个省全部答对才结算", sumMap["答对"] === "2", JSON.stringify(sumMap));
+check("全答对模式：题量多于省份数（错题确实回到了队尾）", Number(sumMap["题量"]) > 2,
+  `题量 ${sumMap["题量"]} > 省份数 2`);
+
+// ── 13. 结算 ─────────────────────────────────────────────────
+section("13. 结算：含总耗时");
 await leaveGame();
 await page.waitForTimeout(150);
 if (await page.isHidden("#screenHome")) { await page.click("#btnHome"); await page.waitForTimeout(150); }
-await pickChip("scopeChips", "group:north");
+await setScope(["north"], ALL_TYPES);
+await pickChip("modeChips", "random");
 await pickChip("knownChips", "location");
 await pickChip("askedChips", "full");
 await pickChip("styleChips", "text");
@@ -494,13 +724,13 @@ check("结算有 6 项", cells.length === 6, cells.join(" | "));
 check("最后一项是总耗时且带单位", /总耗时|Total time/.test(cells[5]) && /秒|s$|s\b/.test(cells[5]), cells[5]);
 await page.screenshot({ path: path.join(shots, "12-summary.png") });
 
-// ── 13. 移动端 ───────────────────────────────────────────────
-section("13. 移动端布局");
+// ── 14. 移动端 ───────────────────────────────────────────────
+section("14. 移动端布局");
 await page.click("#btnHome");
 await page.waitForTimeout(150);
 await page.setViewportSize({ width: 390, height: 844 });
 await page.waitForTimeout(250);
-await pickChip("scopeChips", "all");
+await setScopeAll();
 await pickChip("knownChips", "location");
 await pickChip("askedChips", "full");
 await pickChip("styleChips", "text");
@@ -513,8 +743,8 @@ check("地图与侧栏在窄屏下纵向堆叠", panelBox.y >= mapBox.y + mapBox
 check("窄屏下作答区仍然可用", (await answerBox()).height > 100);
 await page.screenshot({ path: path.join(shots, "13-mobile.png") });
 
-// ── 14. 无报错 ───────────────────────────────────────────────
-section("14. 运行期无报错");
+// ── 15. 无报错 ───────────────────────────────────────────────
+section("15. 运行期无报错");
 check("没有 console error / pageerror / 资源加载失败", errors.length === 0, errors.slice(0, 4).join(" | "));
 
 await browser.close();

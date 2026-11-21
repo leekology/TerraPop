@@ -6,8 +6,11 @@
 //     —— 第一题时这里显示玩法说明
 //   当前题（固定位置）：已知信息 → 题面 → 作答区（固定高度的控件区）
 //
-// 所以答完一题不会有任何"揭示态"：上一题的信息直接落到上方卡片，
-// 下方同一个位置立刻换成下一题。鼠标和视线都不用移动。
+// 四种模式只影响「出题顺序 / 结束条件」，不影响版面：
+//   random    随机一轮：范围内的省份随机排一轮，答完即结束
+//   adjacency 邻接漫游：按地图接壤一路挨着出题
+//   timed     1 分钟极速：60 秒内答得越多越好，时间到就结算
+//   perfect   全答对为止：答错的题排到队尾，全部答对才结束
 // ---------------------------------------------------------------
 
 (function (global) {
@@ -16,6 +19,10 @@
   var U = T.util;
   var t = function (k, v) { return T.i18n.t(k, v); };
   var DIMS = ["full", "short", "capital", "location"];
+  var TYPES = ["province", "autonomous", "municipality", "sar"];
+  var PLAY_MODES = ["random", "adjacency", "timed", "perfect"];
+
+  var TIMED_MS = 60000;
 
   // 上一题的地图画面多留一会儿：下一题如果也要看图，就少留一点
   var MAP_BEAT_IDLE = 1900;
@@ -25,10 +32,12 @@
 
   var DEFAULTS = {
     locale: "zh-Hans",
+    playMode: "random",
     known: "location",
     asked: "full",
     style: "text",
-    scope: "all",
+    scopeGroups: null,          // null → 全部大区（见 pickScope）
+    scopeTypes: null,
     judge: "lenient",
     timer: "off",
     sound: true,
@@ -44,6 +53,9 @@
   };
 
   var settings = Object.assign({}, DEFAULTS, U.loadSettings());
+  settings.scopeGroups = Array.isArray(settings.scopeGroups) ? settings.scopeGroups.slice() : T.groups.slice();
+  settings.scopeTypes = Array.isArray(settings.scopeTypes) ? settings.scopeTypes.slice() : TYPES.slice();
+  if (PLAY_MODES.indexOf(settings.playMode) === -1) settings.playMode = "random";
   function persist() { U.saveSettings(settings); }
 
   var state = {
@@ -54,13 +66,15 @@
     question: null,
     phase: "idle",          // idle | ask | locked
     pending: "",
-    pendingRegion: null,
+    suggestions: [],
+    suggestIndex: -1,
     adjacency: null,
     centers: null,
     radius: null,
     lastResult: null,
     timerHandle: null,
     globalDeadline: 0,
+    timedMode: false,
     mapGen: 0,
     beatPending: false,
     startedAt: 0,
@@ -110,13 +124,6 @@
   function markLang(node, text) {
     if (U.hasHan(text)) node.setAttribute("lang", "zh-Hans");
     return node;
-  }
-
-  /** 把毫秒格式化成「2 分 13 秒」/「13 秒」 */
-  function formatDuration(ms) {
-    var total = Math.max(0, Math.round((ms || 0) / 1000));
-    var m = Math.floor(total / 60), s = total % 60;
-    return m > 0 ? t("summary.timeFmt", { m: m, s: s }) : t("summary.secFmt", { s: s });
   }
 
   // ── 音效 ─────────────────────────────────────────────────────
@@ -183,30 +190,15 @@
     document.documentElement.lang = settings.locale;
   }
 
-  // ── 范围 ─────────────────────────────────────────────────────
+  // ── 范围：大区 × 类型 自由组合 ───────────────────────────────
 
   function scopeRegionIds() {
-    var c = state.country;
-    switch (settings.scope) {
-      case "provincesOnly":
-        return c.regions.filter(function (r) { return r.type === "province"; }).map(function (r) { return r.id; });
-      case "noMunicipality":
-        return c.regions.filter(function (r) { return r.type === "province" || r.type === "autonomous"; })
-          .map(function (r) { return r.id; });
-      default:
-        if (settings.scope.indexOf("group:") === 0) {
-          var g = settings.scope.slice(6);
-          return c.regions.filter(function (r) { return r.group === g; }).map(function (r) { return r.id; });
-        }
-        return null;
-    }
+    var g = settings.scopeGroups, ty = settings.scopeTypes;
+    if (g.length === T.groups.length && ty.length === TYPES.length) return null;   // 全选
+    return state.country.regions.filter(function (r) {
+      return g.indexOf(r.group) !== -1 && ty.indexOf(r.type) !== -1;
+    }).map(function (r) { return r.id; });
   }
-
-  var SCOPES = [
-    { id: "all", key: "scope.all" },
-    { id: "provincesOnly", key: "scope.provincesOnly" },
-    { id: "noMunicipality", key: "scope.noMunicipality" }
-  ].concat(T.groups.map(function (g) { return { id: "group:" + g, key: "group." + g }; }));
 
   function poolSize() {
     var ids = scopeRegionIds();
@@ -222,6 +214,7 @@
 
   // ── chip 组 ──────────────────────────────────────────────────
 
+  /** 单选 chip（radio 语义） */
   function buildChips(host, items, current, onPick) {
     U.clear(host);
     items.forEach(function (it) {
@@ -236,9 +229,40 @@
     });
   }
 
+  /** 多选 chip（checkbox 语义） */
+  function buildToggleChips(host, items, selected, onToggle) {
+    U.clear(host);
+    items.forEach(function (it) {
+      var on = selected.indexOf(it.value) !== -1;
+      var label = U.el("label", {
+        class: "tp-chip tp-chip-toggle" + (on ? " tp-chip-on" : ""),
+        role: "checkbox", "aria-checked": on ? "true" : "false"
+      });
+      var input = U.el("input", { type: "checkbox", value: it.value });
+      input.checked = on;
+      input.addEventListener("change", function () { onToggle(it.value); });
+      label.appendChild(input);
+      label.appendChild(U.el("span", { text: it.label }));
+      host.appendChild(label);
+    });
+  }
+
+  function toggleInArray(arr, value) {
+    var i = arr.indexOf(value);
+    if (i === -1) arr.push(value); else arr.splice(i, 1);
+    return arr;
+  }
+
   // ── 首页 ─────────────────────────────────────────────────────
 
   function buildHome() {
+    // 模式
+    buildChips(el.modeChips, PLAY_MODES.map(function (m) {
+      return { value: m, label: t("mode." + m) };
+    }), settings.playMode, function (v) { settings.playMode = v; persist(); buildHome(); });
+    el.modeDesc.textContent = t("mode." + settings.playMode + ".desc");
+
+    // 已知 / 要猜 / 作答方式
     var dimItems = DIMS.map(function (d) { return { value: d, label: t("dim." + d) }; })
       .concat([{ value: "random", label: t("config.random") }]);
 
@@ -266,20 +290,55 @@
       else if (settings.asked === "location") settings.asked = "capital";
       persist(); buildHome();
     });
-    buildChips(el.scopeChips, SCOPES.map(function (s) {
-      return { value: s.id, label: s.id.indexOf("group:") === 0 ? t("group." + s.id.slice(6)) : t(s.key) };
-    }), settings.scope, function (v) { settings.scope = v; persist(); buildHome(); });
 
+    // 范围：大区多选 × 类型多选
+    buildToggleChips(el.scopeGroupChips, T.groups.map(function (g) {
+      return { value: g, label: t("group." + g) };
+    }), settings.scopeGroups, function (v) {
+      settings.scopeGroups = toggleInArray(settings.scopeGroups.slice(), v);
+      persist(); buildHome();
+    });
+    buildToggleChips(el.scopeTypeChips, TYPES.map(function (ty) {
+      return { value: ty, label: t("type." + ty) };
+    }), settings.scopeTypes, function (v) {
+      settings.scopeTypes = toggleInArray(settings.scopeTypes.slice(), v);
+      persist(); buildHome();
+    });
+
+    U.clear(el.scopePresets);
+    [
+      { id: "all", label: t("scope.presetAll"), groups: T.groups.slice(), types: TYPES.slice() },
+      { id: "province", label: t("scope.presetProvince"), groups: T.groups.slice(), types: ["province"] },
+      { id: "noMuni", label: t("scope.presetNoMunicipality"), groups: T.groups.slice(), types: ["province", "autonomous"] }
+    ].forEach(function (p) {
+      var b = U.el("button", { type: "button", class: "tp-btn tp-btn-ghost tp-btn-sm", text: p.label });
+      b.addEventListener("click", function () {
+        settings.scopeGroups = p.groups.slice();
+        settings.scopeTypes = p.types.slice();
+        persist(); buildHome();
+      });
+      el.scopePresets.appendChild(b);
+    });
+    var allG = U.el("button", { type: "button", class: "tp-btn tp-btn-ghost tp-btn-sm", text: t("scope.selectAllGroups") });
+    allG.addEventListener("click", function () { settings.scopeGroups = T.groups.slice(); persist(); buildHome(); });
+    var noG = U.el("button", { type: "button", class: "tp-btn tp-btn-ghost tp-btn-sm", text: t("scope.clearGroups") });
+    noG.addEventListener("click", function () { settings.scopeGroups = []; persist(); buildHome(); });
+    el.scopePresets.appendChild(allG);
+    el.scopePresets.appendChild(noG);
+
+    // 覆盖数量
     var n = poolSize();
-    el.homeRegionCount.textContent = t("home.regionCount", { n: n });
+    el.homeRegionCount.textContent = n
+      ? t("home.regionCount", { n: n })
+      : t("scope.empty");
+    el.homeRegionCount.classList.toggle("tp-config-warn", n === 0);
+
     el.configSummary.textContent = t("config.summary", {
       known: settings.known === "random" ? t("config.random") : t("dim." + settings.known),
       asked: settings.asked === "random" ? t("config.random") : t("dim." + settings.asked),
       style: t("style." + (settings.asked === "location" ? "locate" : settings.style))
     });
-    el.configSummary.classList.toggle("tp-config-warn", n === 0);
     el.btnStart.disabled = n === 0;
-    if (n === 0) el.configSummary.textContent = t("config.empty");
   }
 
   // ── 地图 ─────────────────────────────────────────────────────
@@ -339,6 +398,10 @@
     ensureMap();
     if (!state.mapData) return;
 
+    var order = settings.playMode === "adjacency" ? "adjacency"
+      : settings.playMode === "timed" ? "endless"
+        : settings.playMode === "perfect" ? "perfect" : "random";
+
     state.session = T.game.createSession({
       country: state.country,
       known: settings.known,
@@ -349,14 +412,16 @@
       adjacency: state.adjacency,
       centers: state.centers,
       radius: state.radius,
-      locale: settings.locale
+      locale: settings.locale,
+      order: order
     });
-    if (!state.session.total) { toast(t("config.empty")); return; }
+    if (!state.session.total) { toast(t("scope.empty")); return; }
 
     state.lastResult = null;
     state.beatPending = false;
     state.startedAt = Date.now();
-    state.globalDeadline = settings.timer === "global" ? Date.now() + 60000 : 0;
+    state.timedMode = settings.playMode === "timed";
+    state.globalDeadline = state.timedMode ? Date.now() + TIMED_MS : 0;
 
     el.mapLegend.hidden = !settings.showLegend;
     showScreen("play");
@@ -372,6 +437,12 @@
     if (name === "home") el.mapLegend.hidden = true;
   }
 
+  /** 本局是否正在进行（有题目还没答完，且正停在答题屏） */
+  function inProgress() {
+    var s = state.session;
+    return !!(s && !s.finished && !el.screenPlay.hidden);
+  }
+
   function quitToHome() {
     stopTimer();
     T.voice.stop();
@@ -382,12 +453,6 @@
     if (state.mapView) { state.mapView.setLocked(true); state.mapView.clearMarks(); state.mapView.setShowCapitals(false); }
     showScreen("home");
     buildHome();
-  }
-
-  /** 本局是否正在进行（有题目还没答完，且正停在答题屏） */
-  function inProgress() {
-    var s = state.session;
-    return !!(s && !s.finished && !el.screenPlay.hidden);
   }
 
   /** 左上角 / 面板里的 ⌂ 都走这里：进行中先确认 */
@@ -422,6 +487,35 @@
     el.comboBadge.classList.toggle("tp-combo-hot", s.combo >= 3);
   }
 
+  /** 进度条：随机/邻接看题号，全答对看已答对数，极速看剩余时间 */
+  function updateProgress() {
+    var s = state.session;
+    if (!s) return;
+    var ratio;
+    if (s.mode === "endless") {
+      var left = Math.max(0, state.globalDeadline - Date.now());
+      ratio = 1 - left / TIMED_MS;
+    } else if (s.mode === "perfect") {
+      ratio = s.total ? s.solvedCount / s.total : 0;
+    } else {
+      ratio = s.total ? s.index / s.total : 0;
+    }
+    el.progressFill.style.width = Math.max(0, Math.min(1, ratio)) * 100 + "%";
+  }
+
+  function updateCounter() {
+    var s = state.session, q = state.question;
+    if (!s || !q) return;
+    var n = q.index + 1;
+    if (s.mode === "perfect") {
+      el.qCounter.textContent = t("progress.perfect", { n: n, solved: s.solvedCount, total: s.total });
+    } else if (s.mode === "endless") {
+      el.qCounter.textContent = t("progress.question", { n: n });
+    } else {
+      el.qCounter.textContent = t("progress.question", { n: n }) + " / " + s.total;
+    }
+  }
+
   // ── 出题（下半区）────────────────────────────────────────────
 
   function nextQuestion() {
@@ -432,10 +526,11 @@
     state.question = q;
     state.phase = "ask";
     state.pending = "";
-    state.pendingRegion = null;
+    state.suggestions = [];
+    state.suggestIndex = -1;
 
-    el.qCounter.textContent = t("question.counter", { n: q.index + 1 }) + " / " + state.session.total;
-    el.progressFill.style.width = (q.index / state.session.total * 100) + "%";
+    updateCounter();
+    updateProgress();
 
     renderCurrent(q);
     applyHints(q);
@@ -446,8 +541,9 @@
     state.beatPending = false;
     applyMapState(q, beat);
 
-    if (settings.timer === "perQuestion") startTimer(20000);
-    else if (settings.timer === "global") startTimer(0);
+    if (state.timedMode) startTimer(0);
+    else if (settings.timer === "perQuestion") startTimer(20000);
+
     if (settings.voiceAuto) speakQuestion(q);
 
     var input = el.answerArea.querySelector(".tp-answer-input");
@@ -468,14 +564,12 @@
   }
 
   function renderCurrent(q) {
-    // 已知信息
     U.clear(el.knownChip);
     el.knownChip.appendChild(U.el("em", { text: t("dim." + q.known) }));
     var knownText = q.known === "location" ? t("question.knownLocation") : boardValue(q.region, q.known);
     el.knownChip.appendChild(markLang(U.el("b", { text: knownText }), knownText));
     if (q.known === "capital") el.knownChip.appendChild(U.el("small", { text: T.game.termOf(q.region) }));
 
-    // 题面
     el.askText.textContent = q.asked === "location"
       ? t("question.askLocation")
       : t("question.prompt", { asked: t("dim." + q.asked) });
@@ -517,15 +611,9 @@
         placeholder: settings.smartInput ? t("input.smartPlaceholder") : t("input.placeholder")
       });
       input.addEventListener("input", onInput);
-      input.addEventListener("keydown", function (e) {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          e.stopPropagation();      // 别冒泡出去
-          commitText();
-        }
-      });
+      input.addEventListener("keydown", onInputKey);
       var ok = U.el("button", { class: "tp-btn tp-btn-primary tp-btn-sm", text: t("action.submit") });
-      ok.addEventListener("click", commitText);
+      ok.addEventListener("click", submitFromInput);
       row.appendChild(input);
       row.appendChild(ok);
       body.appendChild(row);
@@ -555,6 +643,9 @@
     var q = state.question;
     if (!q || state.phase !== "ask") return;
     state.pending = e.target.value;
+    state.suggestIndex = -1;
+    state.suggestions = [];
+
     var box = el.answerArea.querySelector("#suggest");
     if (!box) return;
     U.clear(box);
@@ -563,23 +654,82 @@
     if (!settings.smartInput) return;
 
     var m = T.game.matchInput(state.session.pool, q.asked, settings.locale, state.pending);
-    if (m.unique) {
+
+    // 只有「唯一命中，而且命中的就是正确答案」才自动判定。
+    // 唯一但是别的省 → 不提交，等你按回车，方便改。
+    if (m.unique && m.candidates[0] === q.region.id) {
       e.target.classList.remove("tp-input-bad");
       commitText();
       return;
     }
+
     if (m.kind === "multi") {
       e.target.classList.remove("tp-input-bad");
-      m.candidates.slice(0, 6).forEach(function (id) {
-        var r = state.session.regionById[id];
-        var b = U.el("button", { class: "tp-suggest-item", type: "button", text: boardValue(r, q.asked) });
-        b.addEventListener("click", function () { commit({ kind: "choice", value: boardValue(r, q.asked) }); });
+      state.suggestions = m.candidates.slice(0, 6).map(function (id) {
+        return { id: id, value: boardValue(state.session.regionById[id], q.asked) };
+      });
+      state.suggestions.forEach(function (s, i) {
+        var b = U.el("button", { class: "tp-suggest-item", type: "button", text: s.value });
+        b.dataset.index = String(i);
+        b.addEventListener("click", function () { pickSuggestion(i); });
         box.appendChild(b);
       });
-      box.appendChild(U.el("span", { class: "tp-suggest-hint", text: t("input.ambiguous", { n: m.candidates.length }) }));
+      box.appendChild(U.el("span", { class: "tp-suggest-hint", text: t("input.keyHint") }));
     } else {
       e.target.classList.add("tp-input-bad");
     }
+  }
+
+  function onInputKey(e) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.stopPropagation();
+      submitFromInput();
+    } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      if (!state.suggestions.length) return;
+      e.preventDefault();
+      moveSuggestion(e.key === "ArrowDown" ? 1 : -1);
+    } else if (e.key === "Escape") {
+      if (state.suggestions.length) {
+        e.preventDefault();
+        state.suggestIndex = -1;
+        highlightSuggestion();
+      }
+    }
+  }
+
+  function moveSuggestion(delta) {
+    var n = state.suggestions.length;
+    if (!n) return;
+    var i = state.suggestIndex;
+    i = i < 0 ? (delta > 0 ? 0 : n - 1) : ((i + delta + n) % n);
+    state.suggestIndex = i;
+    highlightSuggestion();
+  }
+
+  function highlightSuggestion() {
+    var items = el.answerArea.querySelectorAll(".tp-suggest-item");
+    Array.prototype.forEach.call(items, function (node, k) {
+      node.classList.toggle("tp-suggest-item-active", k === state.suggestIndex);
+    });
+    if (state.suggestIndex >= 0 && items[state.suggestIndex]) {
+      items[state.suggestIndex].scrollIntoView({ block: "nearest" });
+    }
+  }
+
+  function pickSuggestion(i) {
+    var s = state.suggestions[i];
+    if (!s) return;
+    commit({ kind: "choice", value: s.value });
+  }
+
+  /** 回车 / 「确定」按钮：有高亮候选就提交候选，否则提交输入框里的文字 */
+  function submitFromInput() {
+    if (state.suggestIndex >= 0 && state.suggestions[state.suggestIndex]) {
+      pickSuggestion(state.suggestIndex);
+      return;
+    }
+    commitText();
   }
 
   function commitText() {
@@ -591,7 +741,6 @@
     if (state.phase !== "ask") return;
     var q = state.question;
     if (!q || q.asked !== "location") return;
-    state.pendingRegion = regionId;
     sfx("pick");
     commit({ kind: "locate", regionId: regionId });
   }
@@ -601,7 +750,6 @@
   function commit(answer) {
     if (state.phase !== "ask") return;
     var q = state.question;
-    if (settings.timer === "global") checkGlobalTimeout();
 
     state.phase = "locked";
     stopTimer();
@@ -619,7 +767,7 @@
 
     renderPrevCard(result);
     updateHud();
-    el.progressFill.style.width = ((q.index + 1) / state.session.total * 100) + "%";
+    updateProgress();
 
     state.beatPending = true;
     nextQuestion();      // 零阻断：下一题立刻占上同一个位置
@@ -630,7 +778,7 @@
   function renderPrevCard(result) {
     U.clear(el.prevCard);
     if (!result) {
-      el.prevCard.classList.remove("tp-prev-answer");
+      el.prevCard.classList.remove("tp-prev-answer", "tp-prev-correct", "tp-prev-close", "tp-prev-wrong");
       el.prevCard.appendChild(U.el("h3", { class: "tp-prev-title", text: t("prev.explainTitle") }));
       el.prevCard.appendChild(U.el("p", { class: "tp-prev-body", text: t("prev.explainBody") }));
       return;
@@ -639,18 +787,22 @@
     var region = result.region;
     var cls = result.correct ? "correct" : result.close ? "close" : "wrong";
     el.prevCard.classList.add("tp-prev-answer");
-    el.prevCard.classList.remove("tp-prev-" + "correct", "tp-prev-close", "tp-prev-wrong");
+    el.prevCard.classList.remove("tp-prev-correct", "tp-prev-close", "tp-prev-wrong");
     el.prevCard.classList.add("tp-prev-" + cls);
 
     var head = U.el("div", { class: "tp-prev-head" });
     head.appendChild(U.el("span", { class: "tp-verdict tp-verdict-" + cls, text: t("feedback." + cls) }));
-    head.appendChild(markLang(U.el("b", { class: "tp-prev-name", text: localePick(region.fullNames, settings.locale) }),
-      localePick(region.fullNames, settings.locale)));
+    var fullName = localePick(region.fullNames, settings.locale);
+    head.appendChild(markLang(U.el("b", { class: "tp-prev-name", text: fullName }), fullName));
     head.appendChild(U.el("span", {
       class: "tp-prev-your",
       text: t("prev.yourAnswer") + "：" + (result.given || t("prev.unknown"))
     }));
     el.prevCard.appendChild(head);
+
+    if (result.requeued) {
+      el.prevCard.appendChild(U.el("p", { class: "tp-prev-requeue", text: t("prev.requeued") }));
+    }
 
     var info = U.el("div", { class: "tp-prev-info" });
     DIMS.forEach(function (dim) {
@@ -722,20 +874,17 @@
     } else {
       state.timerHandle = setInterval(function () {
         var l = state.globalDeadline - Date.now();
-        if (l <= 0) { stopTimer(); el.qTimer.textContent = t("time.up"); finish(); return; }
+        if (l <= 0) {
+          stopTimer();
+          el.qTimer.textContent = t("time.up");
+          updateProgress();
+          finish();
+          return;
+        }
         el.qTimer.textContent = Math.ceil(l / 1000) + "s";
+        if (state.session && state.session.mode === "endless") updateProgress();
       }, 200);
     }
-  }
-
-  /** 暂停计时（打开确认框时用）：保留剩余时间 */
-  function pauseTimer() { stopTimer(); }
-
-  /** 继续答题时恢复计时；全局倒计时是绝对时点，会照常走完 */
-  function resumeTimer() {
-    if (state.phase !== "ask") return;
-    if (settings.timer === "perQuestion") startTimer(Math.max(3000, state.timerLeft || 20000));
-    else if (settings.timer === "global") startTimer(0);
   }
 
   function tickTimer(left) {
@@ -748,8 +897,14 @@
     el.qTimer.hidden = true;
   }
 
-  function checkGlobalTimeout() {
-    if (state.globalDeadline && Date.now() >= state.globalDeadline) toast(t("time.up"));
+  /** 暂停计时（打开确认框时用）：保留剩余时间 */
+  function pauseTimer() { stopTimer(); }
+
+  /** 继续答题时恢复计时；全局倒计时是绝对时点，会照常走完 */
+  function resumeTimer() {
+    if (state.phase !== "ask") return;
+    if (state.timedMode) startTimer(0);
+    else if (settings.timer === "perQuestion") startTimer(Math.max(3000, state.timerLeft || 20000));
   }
 
   // ── 结算 ─────────────────────────────────────────────────────
@@ -774,6 +929,13 @@
       ]));
     });
     sfx("finish");
+  }
+
+  /** 把毫秒格式化成「2 分 13 秒」/「13 秒」 */
+  function formatDuration(ms) {
+    var total = Math.max(0, Math.round((ms || 0) / 1000));
+    var m = Math.floor(total / 60), s = total % 60;
+    return m > 0 ? t("summary.timeFmt", { m: m, s: s }) : t("summary.secFmt", { s: s });
   }
 
   // ── 语音 ─────────────────────────────────────────────────────
@@ -835,9 +997,10 @@
 
     el.settingsBody.appendChild(group("settings.timer", [
       { value: "off", label: t("settings.timer.off") },
-      { value: "global", label: t("settings.timer.global") },
       { value: "perQuestion", label: t("settings.timer.perQuestion") }
-    ], settings.timer, function (v) { settings.timer = v; persist(); buildSettings(); }));
+    ], settings.timer === "global" ? "off" : settings.timer, function (v) {
+      settings.timer = v; persist(); buildSettings();
+    }));
 
     var toggles = U.el("div", { class: "tp-set-group" });
     toggles.appendChild(U.el("h3", { text: t("settings.helpers") }));
@@ -901,7 +1064,7 @@
       renderCurrent(state.question);
       applyHints(state.question);
     }
-    if (state.session) renderPrevCard(state.lastResult);
+    if (state.session) { renderPrevCard(state.lastResult); updateCounter(); }
   }
 
   function buildLangSelect() {
@@ -921,7 +1084,8 @@
       "qCounter", "qTimer", "comboBadge", "progressFill", "hudScore", "hudAcc",
       "prevCard", "knownChip", "askText", "hintBar", "answerArea",
       "btnZoomIn", "btnZoomOut", "btnZoomReset", "btnStart", "btnBrand",
-      "knownChips", "askedChips", "styleChips", "scopeChips", "configSummary",
+      "modeChips", "modeDesc", "knownChips", "askedChips", "styleChips",
+      "scopeGroupChips", "scopeTypeChips", "scopePresets", "configSummary",
       "homeRegionCount", "langSelect", "btnSettings", "btnSettingsClose", "settingsOverlay",
       "settingsBody", "btnRestart", "btnHome", "btnQuit", "toast", "summaryBody",
       "confirmOverlay", "confirmBody", "btnConfirmStay", "btnConfirmLeave"

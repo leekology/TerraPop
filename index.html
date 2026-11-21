@@ -53,6 +53,12 @@
       </div>
 
       <div class="tp-card">
+        <h2 class="tp-card-title" data-i18n="mode.title">模式</h2>
+        <div class="tp-chips" id="modeChips"></div>
+        <p class="tp-mode-desc" id="modeDesc"></p>
+      </div>
+
+      <div class="tp-card">
         <h2 class="tp-card-title" data-i18n="config.matrix">玩法组合</h2>
         <div class="tp-config-row">
           <span class="tp-config-key" data-i18n="config.known">已知</span>
@@ -72,7 +78,15 @@
 
       <div class="tp-card">
         <h2 class="tp-card-title" data-i18n="scope.title">范围</h2>
-        <div class="tp-chips" id="scopeChips"></div>
+        <div class="tp-config-row">
+          <span class="tp-config-key" data-i18n="scope.groups">大区</span>
+          <div class="tp-chips" id="scopeGroupChips"></div>
+        </div>
+        <div class="tp-config-row">
+          <span class="tp-config-key" data-i18n="scope.types">类型</span>
+          <div class="tp-chips" id="scopeTypeChips"></div>
+        </div>
+        <div class="tp-chip-row" id="scopePresets"></div>
         <p class="tp-hint-line" id="homeRegionCount"></p>
       </div>
 

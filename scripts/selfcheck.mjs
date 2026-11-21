@@ -312,6 +312,58 @@ check("越难的作答方式得分越高：三选一 < 四选一 < 五选一 < �
   scoreOf("choice3") < scoreOf("choice4") && scoreOf("choice4") < scoreOf("choice5") && scoreOf("choice5") < scoreOf("text"),
   `${scoreOf("choice3")} / ${scoreOf("choice4")} / ${scoreOf("choice5")} / ${scoreOf("text")}`);
 
+// ── 出题顺序的四种模式 ───────────────────────────────────────
+section("四种模式（随机 / 邻接 / 极速 / 全答对）");
+const centers = {};
+map.regions.forEach(r => { centers[r.id] = r.center; });
+const walk = T.game.adjacencyWalk(country.regions, adj, centers);
+check("邻接漫游覆盖每一省且不重复", walk.length === 34 && new Set(walk).size === 34);
+const adjSteps = walk.slice(1).filter((id, i) => (adj[walk[i]] || []).includes(id)).length;
+check("邻接漫游里大部分步都是真的接壤", adjSteps >= Math.floor((walk.length - 1) * 0.6),
+  `相邻 ${adjSteps}/${walk.length - 1}`);
+check("邻接漫游对孤立岛屿也能兜住（台湾/海南在路径里）",
+  walk.includes("CN-TW") && walk.includes("CN-HI"));
+
+function simPerfect(wrongFirst) {
+  const s = T.game.createSession({ country, known: "location", asked: "full", style: "text", adjacency: adj, centers, locale: "zh-Hans", order: "perfect" });
+  let n = 0;
+  while (n < 500) {
+    const q = s.next();
+    if (!q) break;
+    n++;
+    const wrong = n <= wrongFirst;
+    s.submit({ kind: "text", value: wrong ? "一定答错" : T.game.displayFor(q.region, "full", "zh-Hans") });
+  }
+  return { s, n };
+}
+const pf = simPerfect(3);
+check("全答对为止：答错的题会排回队尾，最终全部答对才结束",
+  pf.s.finished && pf.s.solvedCount === pf.s.total, `题量 ${pf.n}，已答对 ${pf.s.solvedCount}/${pf.s.total}`);
+check("全答对为止：因为错题回队，题量大于省份数", pf.n > pf.s.total, `${pf.n} > ${pf.s.total}`);
+
+const se = T.game.createSession({ country, known: "location", asked: "full", style: "text", adjacency: adj, centers, locale: "zh-Hans", order: "endless" });
+let endlessCount = 0;
+while (endlessCount < 120) {
+  const q = se.next();
+  if (!q) break;
+  endlessCount++;
+  se.submit({ kind: "skip" });
+}
+check("极速模式的队列不会耗尽（可以一直出题）", endlessCount === 120 && !se.finished, `出了 ${endlessCount} 题`);
+
+const sr = T.game.createSession({ country, known: "location", asked: "full", style: "text", adjacency: adj, centers, locale: "zh-Hans", order: "random" });
+check("随机一轮：题量等于范围内省份数且初始进度为 0", sr.total === 34 && sr.progressRatio() === 0);
+for (let i = 0; i < 34; i++) { const q = sr.next(); if (q) sr.submit({ kind: "skip" }); }
+const tail = sr.next();
+check("随机一轮：答完 34 题后就结束", tail === null && sr.finished);
+
+// 范围：大区 × 类型 自由组合
+const pickScope = (groups, types) => country.regions.filter(r => groups.includes(r.group) && types.includes(r.type));
+check("范围：华北 + 全部类型 = 5 个", pickScope(["north"], ["province", "autonomous", "municipality", "sar"]).length === 5);
+check("范围：华北 + 只含省 = 2 个", pickScope(["north"], ["province"]).length === 2);
+check("范围：全部大区 + 只含省 = 23 个", pickScope(T.groups, ["province"]).length === 23);
+check("范围：全部大区 + 省和自治区 = 28 个", pickScope(T.groups, ["province", "autonomous"]).length === 28);
+
 // ── 文案 ─────────────────────────────────────────────────────
 section("界面文案");
 const zh = T.locales["zh-Hans"], en = T.locales.en;
@@ -337,7 +389,7 @@ for (const f of ["js/app.js", "js/game.js", "js/map.js"]) {
 "province autonomous municipality sar".split(" ").forEach(k => usedKeys.add("type." + k));
 "north northeast east central south southwest northwest".split(" ").forEach(g => usedKeys.add("group." + g));
 "score correct total accuracy bestCombo title time timeFmt secFmt".split(" ").forEach(k => usedKeys.add("summary." + k));
-"all provincesOnly noMunicipality".split(" ").forEach(k => usedKeys.add("scope." + k));
+["random", "adjacency", "timed", "perfect"].forEach(m => { usedKeys.add("mode." + m); usedKeys.add("mode." + m + ".desc"); });
 
 const missingI18n = [...usedKeys].filter(k => !zh[k]);
 check("代码里用到的文案 key 都有翻译", missingI18n.length === 0, missingI18n.join(","));

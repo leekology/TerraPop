@@ -301,6 +301,46 @@
     return "normal";
   }
 
+  // ── 出题顺序 ─────────────────────────────────────────────────
+
+  /**
+   * 邻接漫游：从随机一个省出发，每次尽量走到未访问过的相邻省；
+   * 走不动了（比如台湾、海南，或者范围把邻居排除掉了）就跳到离当前最近的未访问省份。
+   */
+  function adjacencyWalk(pool, adjacency, centers, rnd) {
+    var remaining = pool.map(function (r) { return r.id; });
+    var inPool = {};
+    remaining.forEach(function (id) { inPool[id] = true; });
+    var out = [];
+    if (!remaining.length) return out;
+
+    var cur = remaining[Math.floor((rnd || Math.random)() * remaining.length)];
+    while (remaining.length) {
+      out.push(cur);
+      remaining = remaining.filter(function (id) { return id !== cur; });
+      if (!remaining.length) break;
+
+      var nb = ((adjacency || {})[cur] || []).filter(function (id) {
+        return inPool[id] && remaining.indexOf(id) !== -1;
+      });
+      if (nb.length) {
+        cur = nb[Math.floor((rnd || Math.random)() * nb.length)];
+        continue;
+      }
+      var c0 = (centers && centers[cur]) || [0, 0];
+      var best = remaining[0], bd = Infinity;
+      remaining.forEach(function (id) {
+        var c = (centers && centers[id]) || [0, 0];
+        var d = (c[0] - c0[0]) * (c[0] - c0[0]) + (c[1] - c0[1]) * (c[1] - c0[1]);
+        if (d < bd) { bd = d; best = id; }
+      });
+      cur = best;
+    }
+    return out;
+  }
+
+  var ORDER_MODES = ["random", "adjacency", "endless", "perfect"];
+
   // ── 会话 ─────────────────────────────────────────────────────
 
   function createSession(cfg) {
@@ -308,21 +348,27 @@
     var country = cfg.country;
     var locale = cfg.locale || country.defaultLocale;
     var rnd = cfg.random || Math.random;
+    var mode = ORDER_MODES.indexOf(cfg.order) !== -1 ? cfg.order : "random";
 
     var pool = country.regions.filter(function (r) {
       if (cfg.regionIds && cfg.regionIds.indexOf(r.id) === -1) return false;
       return eligible(r, cfg.known, cfg.asked, rnd);
     });
+    var poolIds = pool.map(function (r) { return r.id; });
 
     var session = {
       country: country,
       config: cfg,
       locale: locale,
+      mode: mode,
       pool: pool,
-      total: 0,
-      index: -1,
+      poolIds: poolIds,
+      total: poolIds.length,
+      index: -1,              // 第几题（1 起算）
       current: null,
-      order: [],
+      queue: [],
+      solved: {},             // perfect 模式：已经答对过的省份
+      solvedCount: 0,
       score: 0,
       combo: 0,
       bestCombo: 0,
@@ -332,42 +378,64 @@
       finished: false
     };
 
-    session.order = U.shuffle(pool.map(function (r) { return r.id; }), rnd);
-    session.total = session.order.length;
-
     session.regionById = {};
     country.regions.forEach(function (r) { session.regionById[r.id] = r; });
 
+    session.queue = mode === "adjacency"
+      ? adjacencyWalk(pool, cfg.adjacency, cfg.centers, rnd)
+      : U.shuffle(poolIds, rnd);
+
+    function refillForEndless() {
+      var next = U.shuffle(poolIds, rnd);
+      // 别让新一轮的第一题和刚答完的重复
+      if (next.length > 1 && session.lastId && next[0] === session.lastId) {
+        next.push(next.shift());
+      }
+      return next;
+    }
+
     session.next = function () {
-      session.index += 1;
-      if (session.index >= session.order.length) {
-        session.finished = true;
-        session.current = null;
-        return null;
+      var guard = 0;
+      while (guard++ < 500) {
+        if (!session.queue.length) {
+          if (mode === "endless") {
+            session.queue = refillForEndless();
+            if (!session.queue.length) { session.finished = true; session.current = null; return null; }
+          } else {
+            session.finished = true;
+            session.current = null;
+            return null;
+          }
+        }
+        var id = session.queue.shift();
+        var region = session.regionById[id];
+        if (!region) continue;
+        var pair = resolvePair(region, cfg.known, cfg.asked, rnd);
+        if (!pair) continue;              // 这一省在这个组合下出不了题，跳过
+
+        session.index += 1;
+        session.lastId = id;
+        var style = styleFor(pair.asked, cfg.style);
+        var question = {
+          index: session.index,
+          region: region,
+          known: pair.known,
+          asked: pair.asked,
+          style: style,
+          term: termOf(region),
+          choices: null
+        };
+        if (CHOICE_COUNT[style]) {
+          var n = CHOICE_COUNT[style];
+          var ds = distractors(region, pair.asked, country.regions, n, difficultyForStyle(style), rnd, locale);
+          question.choices = U.shuffle(ds.concat([displayFor(region, pair.asked, locale)]), rnd);
+        }
+        session.current = question;
+        return question;
       }
-      var region = session.regionById[session.order[session.index]];
-      var pair = resolvePair(region, cfg.known, cfg.asked, rnd);
-      if (!pair) { return session.next(); }
-
-      var style = styleFor(pair.asked, cfg.style);
-      var question = {
-        index: session.index,
-        region: region,
-        known: pair.known,
-        asked: pair.asked,
-        style: style,
-        term: termOf(region),
-        choices: null
-      };
-
-      if (CHOICE_COUNT[style]) {
-        var n = CHOICE_COUNT[style];
-        var ds = distractors(region, pair.asked, country.regions, n, difficultyForStyle(style), rnd, locale);
-        question.choices = U.shuffle(ds.concat([displayFor(region, pair.asked, locale)]), rnd);
-      }
-
-      session.current = question;
-      return question;
+      session.finished = true;
+      session.current = null;
+      return null;
     };
 
     /**
@@ -405,6 +473,15 @@
       if (correct) session.correctCount += 1;
       session.answeredCount += 1;
 
+      // 全答对为止：答对了记一次通关，答错的题排到队尾再来一遍
+      if (correct && !session.solved[region.id]) {
+        session.solved[region.id] = true;
+        session.solvedCount += 1;
+      }
+      if (mode === "perfect" && !correct) {
+        session.queue.push(region.id);
+      }
+
       var mult = correct ? 1 + Math.min(session.combo - 1, 5) * 0.1 : 1;
       var gained = Math.round(base * mult);
       session.score += gained;
@@ -431,7 +508,8 @@
         gained: gained,
         multiplier: mult,
         combo: session.combo,
-        score: session.score
+        score: session.score,
+        requeued: mode === "perfect" && !correct
       };
       session.history.push(result);
       return result;
@@ -440,7 +518,15 @@
     session.accuracy = function () {
       return session.answeredCount ? session.correctCount / session.answeredCount : 0;
     };
-    session.remaining = function () { return Math.max(0, session.order.length - session.index - 1); };
+    session.remaining = function () { return session.queue.length; };
+
+    /** 进度比例（0~1）；endless 交给调用方按时间算 */
+    session.progressRatio = function () {
+      if (mode === "perfect") return session.total ? session.solvedCount / session.total : 0;
+      if (mode === "endless") return 0;
+      if (!session.total) return 0;
+      return Math.max(0, Math.min(1, session.index / session.total));
+    };
 
     return session;
   }
@@ -461,10 +547,12 @@
     KNOWN_OPTIONS: KNOWN_OPTIONS,
     ASKED_OPTIONS: ASKED_OPTIONS,
     STYLES: STYLES,
+    ORDER_MODES: ORDER_MODES,
     CHOICE_COUNT: CHOICE_COUNT,
     STYLE_WEIGHT: STYLE_WEIGHT,
     BASE_POINTS: BASE_POINTS,
     MATRIX: MATRIX,
+    adjacencyWalk: adjacencyWalk,
     supports: supports,
     availableDims: availableDims,
     expand: expand,

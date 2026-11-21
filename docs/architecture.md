@@ -149,13 +149,26 @@ locales/*  ──┘
 
 ```js
 MATRIX                 // 12 种「已知 → 要猜」组合
+ORDER_MODES            // ["random","adjacency","endless","perfect"]
+adjacencyWalk(pool, adjacency, centers)   // 邻接漫游路径
 matchInput(pool, dim, locale, input) -> { kind, candidates, unique }
 judgeText(target, dim, locale, input) -> { status, ratio }
-createSession({ country, known, asked, style, regionIds, judge, adjacency, centers, radius, locale })
+createSession({ country, known, asked, style, regionIds, order, judge, adjacency, centers, radius, locale })
 ```
 
 `createSession().submit(answer)` 接受统一形状 `{kind:'text'|'choice'|'locate'|'skip', value?, regionId?}`，
 语音作答只要产出同样的对象就能接进来。
+
+会话对象暴露的内容（给进度显示用）：
+
+```js
+session.mode            // "random" | "adjacency" | "endless" | "perfect"
+session.total           // 范围内省份数
+session.index           // 第几题（0 起算）
+session.solvedCount     // perfect 模式：已答对的省份数
+session.progressRatio() // 0~1（endless 返回 0，交给界面按时间算）
+session.queue           // 剩余队列（perfect 会把错题 push 回去）
+```
 
 ### `TERRAPOP.locales[locale]`（`locales/*.js`）
 

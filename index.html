@@ -26,18 +26,6 @@
     </span>
   </div>
 
-  <div class="tp-hud" id="scoreBar" hidden>
-    <span class="tp-stat tp-stat-combo" id="comboChip">
-      <em data-i18n="hud.combo">连击</em><b id="hudCombo">0</b>
-    </span>
-    <span class="tp-stat">
-      <em data-i18n="hud.accuracy">正确率</em><b id="hudAcc">—</b>
-    </span>
-    <span class="tp-stat">
-      <em data-i18n="hud.score">得分</em><b id="hudScore">0</b>
-    </span>
-  </div>
-
   <div class="tp-topbar-actions">
     <label class="tp-select-wrap">
       <span class="tp-sr-only" data-i18n="settings.language">界面语言</span>
@@ -64,7 +52,6 @@
 
       <div class="tp-card">
         <h2 class="tp-card-title" data-i18n="config.matrix">玩法组合</h2>
-
         <div class="tp-config-row">
           <span class="tp-config-key" data-i18n="config.known">已知</span>
           <div class="tp-chips" id="knownChips" role="radiogroup"></div>
@@ -77,7 +64,6 @@
           <span class="tp-config-key" data-i18n="config.style">作答方式</span>
           <div class="tp-chips" id="styleChips" role="radiogroup"></div>
         </div>
-
         <p class="tp-config-summary" id="configSummary"></p>
         <p class="tp-config-note" data-i18n="config.note"></p>
       </div>
@@ -99,15 +85,13 @@
     </div>
   </section>
 
-  <!-- ── 答题：一问一答 ─────────────────────────────────── -->
+  <!-- ── 答题：固定位置、无阻断 ─────────────────────────── -->
   <section class="tp-screen" id="screenPlay" hidden>
     <div class="tp-play">
 
       <div class="tp-map-pane">
         <div class="tp-map-host" id="mapHost"></div>
-
-        <div class="tp-legend" id="mapLegend" data-i18n-title="legend.title"></div>
-
+        <div class="tp-legend" id="mapLegend"></div>
         <div class="tp-map-controls">
           <button type="button" class="tp-icon-btn" id="btnZoomIn" data-i18n-title="action.zoomIn" title="放大">＋</button>
           <button type="button" class="tp-icon-btn" id="btnZoomOut" data-i18n-title="action.zoomOut" title="缩小">－</button>
@@ -119,26 +103,27 @@
         <div class="tp-panel-head">
           <button type="button" class="tp-icon-btn tp-quit-btn" id="btnQuit" data-i18n-title="action.backHome" title="返回首页">⌂</button>
           <span class="tp-counter" id="qCounter"></span>
-          <span class="tp-progress-text" id="qProgress"></span>
           <span class="tp-timer" id="qTimer" hidden></span>
           <span class="tp-combo-badge" id="comboBadge" hidden></span>
+          <span class="tp-hud">
+            <span class="tp-hud-item"><em data-i18n="hud.score">得分</em><b id="hudScore">0</b></span>
+            <span class="tp-hud-item"><em data-i18n="hud.accuracy">正确率</em><b id="hudAcc">—</b></span>
+          </span>
         </div>
         <div class="tp-progress-bar"><i id="progressFill"></i></div>
 
-        <div class="tp-ask" id="askCard">
-          <p class="tp-ask-text" id="askText"></p>
-        </div>
+        <!-- 固定高度的「上一题 + 百科」卡片；第一题显示玩法说明 -->
+        <section class="tp-prev" id="prevCard" aria-live="polite"></section>
 
-        <div class="tp-board" id="infoBoard"></div>
-
-        <div class="tp-reveal" id="revealInline" hidden>
-          <p class="tp-memo" id="revealMemo"></p>
-          <div class="tp-reveal-actions">
-            <button type="button" class="tp-btn tp-btn-ghost" id="btnDetail" data-i18n="action.detail">百科</button>
-            <button type="button" class="tp-btn tp-btn-primary" id="btnNext" data-i18n="action.next">下一题</button>
+        <!-- 固定位置的当前题：已知信息 + 题面 + 作答区 -->
+        <section class="tp-current">
+          <div class="tp-current-head">
+            <span class="tp-known-chip" id="knownChip"></span>
+            <span class="tp-ask-text" id="askText"></span>
           </div>
-          <div class="tp-auto"><i id="autoFill"></i></div>
-        </div>
+          <div class="tp-hints" id="hintBar"></div>
+          <div class="tp-answer" id="answerArea"></div>
+        </section>
       </aside>
 
     </div>
@@ -157,19 +142,6 @@
   </section>
 
 </main>
-
-<!-- ── 百科详情（可选，不打断快速模式）─────────────────── -->
-<div class="tp-overlay" id="wikiOverlay" hidden>
-  <div class="tp-modal" role="dialog" aria-modal="true" aria-labelledby="wikiTitle">
-    <div class="tp-modal-head">
-      <span class="tp-verdict" id="wikiBadge"></span>
-      <h2 id="wikiTitle"></h2>
-      <button type="button" class="tp-icon-btn tp-close" id="btnWikiSpeak" data-i18n-title="action.speak" title="朗读">🔊</button>
-      <button type="button" class="tp-icon-btn tp-close" id="btnWikiClose" aria-label="close">✕</button>
-    </div>
-    <div class="tp-modal-body" id="wikiBody"></div>
-  </div>
-</div>
 
 <!-- ── 设置 ───────────────────────────────────────────────── -->
 <div class="tp-overlay" id="settingsOverlay" hidden>

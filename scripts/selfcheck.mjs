@@ -212,6 +212,19 @@ check("石家庄：sjz 是精确匹配", match("sjz", "capital").kind === "exact
 check("石家庄：shijiazhuang 也是精确匹配", match("shijiazhuang", "capital").kind === "exact");
 check("石家庄：汉字「石家庄」是精确匹配", match("石家庄", "capital").kind === "exact");
 check("别称只在完全输入时才算：石头城 → 南京", match("石头城", "capital").candidates.join() === "CN-JS");
+
+// ── 地貌标注不能泄露省份 ─────────────────────────────────────
+section("地图标注不泄露省份");
+const forbidden = T.map.buildForbiddenWords(country, "zh-Hans");
+check("省名 / 全称 / 简称都被列入敏感词", ["四川", "四川省", "Sichuan", "冀"].every(w => forbidden.indexOf(w) !== -1));
+const LEAKY = ["四川盆地", "内蒙古高原", "青藏高原", "云贵高原", "青海湖", "滇池", "黑龙江", "雅鲁藏布江", "秦岭"];
+check("会泄露省名/简称的地貌名都能被识别出来", LEAKY.every(n => T.map.leaks(n, forbidden)), 
+  LEAKY.filter(n => !T.map.leaks(n, forbidden)).join(","));
+const GENERIC = ["plateau", "basin", "plain", "desert", "hills"].map(k => T.locales["zh-Hans"]["legend." + k]);
+check("面状地貌用的通用类型名本身不含省名", GENERIC.every(g => !T.map.leaks(g, forbidden)), GENERIC.join(","));
+const SAFE_NAMES = ["长江", "黄河", "珠江", "松花江", "淮河", "澜沧江", "塔里木河", "鄱阳湖", "洞庭湖", "太湖", "天山", "昆仑山", "大兴安岭", "太行山", "南岭", "武夷山"];
+check("不会泄露的山河湖名可以照常标注", SAFE_NAMES.every(n => !T.map.leaks(n, forbidden)),
+  SAFE_NAMES.filter(n => T.map.leaks(n, forbidden)).join(","));
 check("湖北/河北 的 hb 有歧义，会给出候选", (() => {
   const m = match("hb", "full");
   return m.kind === "multi" && m.candidates.includes("CN-HE") && m.candidates.includes("CN-HB");

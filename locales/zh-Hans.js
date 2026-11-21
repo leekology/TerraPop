@@ -56,25 +56,29 @@ window.TERRAPOP.locales["zh-Hans"] = {
   "hud.score": "得分",
   "hud.comboBadge": "{n} 连击",
 
+  // ── 题面 / 作答 ──
   "question.counter": "第 {n} 题",
-  "question.prompt": "已知「{known}」，请说出它的「{asked}」",
+  "question.prompt": "请说出它的「{asked}」",
   "question.askLocation": "点地图选答案",
-  "question.knownLocation": "已在地图上标出",
+  "question.knownLocation": "已在地图上圈出",
   "question.hintFirst": "首字提示：{v}",
   "question.hintCapitalMarker": "已标出所有{term}位置",
 
   "input.placeholder": "输入你的答案",
   "input.smartPlaceholder": "输入答案，或拼音首字母（如 sjz）",
-  "input.smartHint": "支持拼音、拼音首字母；无歧义时会自动判定",
+  "input.smartHint": "支持拼音与首字母，无歧义时自动判定",
   "input.ambiguous": "{n} 个候选，点一个或继续输入",
 
-  "board.hidden": "待揭晓",
+  // ── 上一题卡片 ──
+  "prev.title": "上一题",
+  "prev.explainTitle": "怎么玩",
+  "prev.explainBody": "系统给出四个信息里的一个，你只要答出另一个。位置题直接点地图，其余题可以填也可以选；填的时候支持拼音和拼音首字母，输入到没有歧义就自动判对。答完这一题的信息和百科会出现在这张卡片里，下面立刻换成下一题——位置固定、不打断，连击越高分越高。",
+  "prev.none": "还没答过题",
+  "prev.yourAnswer": "你答的是",
+  "prev.unknown": "未作答",
 
   "action.submit": "确定",
   "action.skip": "跳过",
-  "action.next": "下一题",
-  "action.seeResult": "看结果",
-  "action.detail": "百科",
   "action.restart": "再来一局",
   "action.backHome": "返回首页",
   "action.speak": "朗读",
@@ -115,13 +119,8 @@ window.TERRAPOP.locales["zh-Hans"] = {
   "settings.timer.off": "不限时",
   "settings.timer.global": "全局 60 秒冲分",
   "settings.timer.perQuestion": "每题 20 秒",
-  "settings.autoDelay": "揭示停留时长",
-  "settings.delay.fast": "快（1 秒）",
-  "settings.delay.normal": "正常（1.6 秒）",
-  "settings.delay.slow": "慢（2.6 秒）",
   "settings.helpers": "辅助",
   "settings.smartInput": "智能输入（拼音 / 首字母）",
-  "settings.autoAdvance": "自动进入下一题",
   "settings.hintFirst": "首字提示",
   "settings.hintCapital": "显示省会标记",
   "settings.hintGroup": "定位题提示大区",
@@ -130,6 +129,7 @@ window.TERRAPOP.locales["zh-Hans"] = {
   "settings.sound": "音效",
   "settings.motion": "动画",
   "settings.voice.on": "自动朗读题面",
+  "settings.voice.notImplemented": "语音作答还在开发中，敬请期待。",
 
   "summary.title": "本局结束",
   "summary.score": "总分",
@@ -145,14 +145,11 @@ window.TERRAPOP.locales["zh-Hans"] = {
 
   "home.startCta": "开始挑战",
   "home.howto.title": "怎么玩",
-  "home.howto.body": "系统给出一个信息（全称 / 简称 / 省会 / 位置），你只需要答出另一个。位置题直接点地图，其它题可以填也可以选；填的时候支持拼音和拼音首字母，输入到没有歧义就自动判对。答完立刻揭晓全部信息，连击越高分数越高。",
+  "home.howto.body": "系统给出一个信息（全称 / 简称 / 省会 / 位置），你只需答出另一个。位置题直接点地图，其余题可以填也可以选；填的时候支持拼音和拼音首字母，输入到没有歧义就自动判对。答完立刻揭晓全部信息，位置固定、不打断，连击越高分越高。",
   "home.regionCount": "本期题目覆盖 {n} 个省级行政区",
 
   "map.insetSouthChinaSea": "南海诸岛",
   "map.insetHongKongMacao": "香港 · 澳门",
-
-  "voice.unsupported": "当前浏览器不支持语音朗读。",
-  "voice.notImplemented": "语音作答还在开发中，敬请期待。",
 
   "time.up": "时间到",
   "misc.close": "关闭"

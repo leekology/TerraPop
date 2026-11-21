@@ -48,6 +48,33 @@
   }
 
   /**
+   * 把「不该出现在地图上的词」算出来：省名、全称、简称。
+   * 地貌标注如果包含这些词，就会在图上直接泄露答案（例如「四川盆地」「青海湖」），
+   * 所以面状地貌一律只标类型名（高原 / 盆地 / 平原 / 沙漠 / 丘陵），
+   * 山脉 / 河流 / 湖泊遇到会泄露的名字就干脆不标。
+   */
+  function buildForbiddenWords(country, locale) {
+    var out = [];
+    ((country && country.regions) || []).forEach(function (r) {
+      ["names", "fullNames"].forEach(function (k) {
+        var o = r[k];
+        if (!o) return;
+        [o[locale], o["zh-Hans"], o.en].forEach(function (v) { if (v) out.push(v); });
+      });
+      (r.short || []).forEach(function (s) { if (s.char) out.push(s.char); });
+    });
+    return out.filter(function (v, i) { return v && out.indexOf(v) === i; })
+      .sort(function (a, b) { return b.length - a.length; });
+  }
+
+  function leaks(text, forbidden) {
+    for (var i = 0; i < forbidden.length; i++) {
+      if (forbidden[i] && text.indexOf(forbidden[i]) !== -1) return true;
+    }
+    return false;
+  }
+
+  /**
    * 用"采样顶点 + 最近距离"近似求行政区邻接表。
    * 阈值单位是地图坐标；由于省界抽稀，边界会有零点几单位的缝隙。
    */
@@ -214,8 +241,9 @@
     var gCapitals = U.svgEl("g", { class: "tp-capitals" });
     var gLabels = U.svgEl("g", { class: "tp-labels" });
     var gTerrainLabels = U.svgEl("g", { class: "tp-terrain-labels" });
+    var gSpot = U.svgEl("g", { class: "tp-spotlight-layer" });
 
-    // 图层顺序：陆地底板 → 省份填色 → 省界 → 地貌 → 地貌标注 → 标记/省会/标签
+    // 图层顺序：陆地底板 → 省份填色 → 省界 → 地貌 → 地貌标注 → 聚光灯 → 标记/省会/标签
     // 地貌画在省界之上，才不会被省份填色盖住（野外地图的习惯画法）
     viewport.appendChild(gLand);
     viewport.appendChild(gFills);
@@ -223,9 +251,28 @@
     viewport.appendChild(gLines);
     viewport.appendChild(gLandformClip);
     viewport.appendChild(gTerrainLabels);
+    viewport.appendChild(gSpot);
     viewport.appendChild(gOverlay);
     viewport.appendChild(gCapitals);
     viewport.appendChild(gLabels);
+
+    // ── 「找准位置」聚光灯 ─────────────────────────────────────
+    // 已知位置时把整幅地图压一层白纱，只把目标省挖空，一眼就能看到它在哪。
+    var spotMask = U.svgEl("mask", {
+      id: "tp-spot", maskUnits: "userSpaceOnUse",
+      x: -bleed, y: -bleed, width: W + bleed * 2, height: H + bleed * 2
+    });
+    spotMask.appendChild(U.svgEl("rect", {
+      x: -bleed, y: -bleed, width: W + bleed * 2, height: H + bleed * 2, fill: "#ffffff"
+    }));
+    var spotHole = U.svgEl("path", { fill: "#000000" });
+    spotMask.appendChild(spotHole);
+    defs.appendChild(spotMask);
+    gSpot.appendChild(U.svgEl("rect", {
+      class: "tp-spotlight",
+      x: -bleed, y: -bleed, width: W + bleed * 2, height: H + bleed * 2,
+      mask: "url(#tp-spot)"
+    }));
 
     // 大陆轮廓（厚白描边 + 投影），用所有省界拼成一张"陆地剪影"
     var allD = mapData.regions.map(function (r) { return r.d; }).join(" ");
@@ -361,36 +408,40 @@
     function buildTerrainLabels() {
       U.clear(gTerrainLabels);
       if (!terrain || !state.showTerrainLabels) return;
+      var forbidden = buildForbiddenWords(country, locale);
+
+      // 面状地貌：一律只标类型名，避免「四川盆地」这种直接泄露省份的写法
       (terrain.landforms || []).forEach(function (lf) {
         if (lf.label === false) return;
         var c = project(lf.center);
-        var name = locOf(lf.names);
-        if (!name) return;
-        // 椭圆看着够大才写名字，否则太小挤成一团
-        var rx = Math.abs(lf.rx) * proj.cosLat * proj.k;
-        if (rx < 42) return;
-        terrainLabel(c[0], c[1], name, "tp-tl-" + (lf.kind || "plateau"));
+        if (Math.abs(lf.rx) * proj.cosLat * proj.k < 42) return;
+        terrainLabel(c[0], c[1], T.i18n.t("legend." + (lf.kind || "plateau")), "tp-tl-type");
       });
+
+      // 山脉 / 河流 / 湖泊：名字里带省名或简称的就不标（黑龙江、雅鲁藏布江、青海湖、滇池、秦岭…）
       (terrain.ranges || []).forEach(function (rg) {
         if (rg.label === false) return;
+        var name = locOf(rg.names);
+        if (!name || leaks(name, forbidden)) return;
         var pts = rg.points.map(project);
         var mid = pts[Math.floor((pts.length - 1) / 2)];
-        var name = locOf(rg.names);
-        if (name) terrainLabel(mid[0], mid[1] - 11, name, "tp-tl-range");
+        terrainLabel(mid[0], mid[1] - 11, name, "tp-tl-range");
       });
       (terrain.rivers || []).forEach(function (r) {
         if ((r.width || 0) < 5) return;
+        var name = locOf(r.names);
+        if (!name || leaks(name, forbidden)) return;
         var pts = r.points.map(project);
         var mid = pts[Math.floor((pts.length - 1) / 2)];
-        var name = locOf(r.names);
-        if (name) terrainLabel(mid[0], mid[1] - 8, name, "tp-tl-water");
+        terrainLabel(mid[0], mid[1] - 8, name, "tp-tl-water");
       });
       (terrain.lakes || []).forEach(function (l) {
+        var name = locOf(l.names);
+        if (!name || leaks(name, forbidden)) return;
         var pts = l.points.map(project);
         var b = bboxOf(pts);
         if ((b[2] - b[0]) < 14 && (b[3] - b[1]) < 14) return;
-        var name = locOf(l.names);
-        if (name) terrainLabel((b[0] + b[2]) / 2, b[1] - 5, name, "tp-tl-water");
+        terrainLabel((b[0] + b[2]) / 2, b[1] - 5, name, "tp-tl-water");
       });
     }
     buildTerrainLabels();
@@ -603,7 +654,7 @@
 
     // ── 对外 API ──────────────────────────────────────────────
 
-    return {
+    var api = {
       svg: svg,
       viewport: viewport,
       project: project,
@@ -642,19 +693,34 @@
         });
       },
 
+      /** 把聚光灯打在某个省上；传 null 收起 */
+      setSpot: function (id) {
+        if (id && regionById[id]) {
+          spotHole.setAttribute("d", regionById[id].d);
+          gSpot.classList.add("tp-spot-on");
+        } else {
+          spotHole.setAttribute("d", "");
+          gSpot.classList.remove("tp-spot-on");
+        }
+      },
+
       /** 题面已知位置时高亮某个省 */
       highlight: function (id, kind) {
         U.clear(gOverlay);
-        if (!id || !regionPaths[id]) return;
+        if (!id || !regionPaths[id]) { api.setSpot(null); return; }
+        api.setSpot(id);
+        gOverlay.appendChild(U.svgEl("path", { class: "tp-mark-halo tp-mark-halo-" + (kind || "given"), d: regionById[id].d }));
         gOverlay.appendChild(U.svgEl("path", { class: "tp-mark tp-mark-" + (kind || "given"), d: regionById[id].d }));
       },
 
-      /** 揭示：正确省高亮 + 省会脉动 + 省名标签 + 引线 */
+      /** 揭示：把聚光灯移到正确省 + 省会脉动 + 省名标签 + 引线 */
       reveal: function (region, status) {
         U.clear(gOverlay);
         U.clear(gLabels);
         if (!region || !regionPaths[region.id]) return;
 
+        api.setSpot(region.id);
+        gOverlay.appendChild(U.svgEl("path", { class: "tp-mark-halo tp-mark-halo-" + (status || "correct"), d: regionById[region.id].d }));
         gOverlay.appendChild(U.svgEl("path", { class: "tp-mark tp-mark-" + (status || "correct"), d: regionById[region.id].d }));
 
         var pos = regionById[region.id].label || regionById[region.id].center;
@@ -682,7 +748,7 @@
         gLabels.appendChild(g);
       },
 
-      clearMarks: function () { U.clear(gOverlay); U.clear(gLabels); },
+      clearMarks: function () { U.clear(gOverlay); U.clear(gLabels); api.setSpot(null); },
 
       focusRegion: function (id) {
         var r = regionById[id];
@@ -699,6 +765,7 @@
       zoomIn: function () { zoomAt(1.25, W / 2, H / 2); },
       zoomOut: function () { zoomAt(1 / 1.25, W / 2, H / 2); }
     };
+    return api;
   }
 
   T.map = {
@@ -706,6 +773,8 @@
     pathPoints: pathPoints,
     bboxOf: bboxOf,
     buildAdjacency: buildAdjacency,
-    distance: distance
+    distance: distance,
+    buildForbiddenWords: buildForbiddenWords,
+    leaks: leaks
   };
 })(window);

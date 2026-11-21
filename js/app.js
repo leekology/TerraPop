@@ -1,8 +1,13 @@
-// TerraPop · 界面装配与流程（一问一答 · 快速模式）
+// TerraPop · 界面装配与流程（问答分离 · 位置固定 · 零阻断）
 // ---------------------------------------------------------------
-// 每道题只问一个维度，其余信息直接画在「信息板」上，不弹窗。
-// 答完就地揭示 + 记住连击，然后自动进入下一题（可关）。
-// 百科全文仍然保留，但改成可选的详情弹窗，不打断节奏。
+// 版面从上到下固定为：
+//   头部（题号 / 计时 / 连击 / 得分 / 正确率）+ 进度条
+//   上一题卡片（固定高度、内部滚动）：上一题的四维信息 + 记忆点 + 双语百科
+//     —— 第一题时这里显示玩法说明
+//   当前题（固定位置）：已知信息 → 题面 → 作答区（固定高度的控件区）
+//
+// 所以答完一题不会有任何"揭示态"：上一题的信息直接落到上方卡片，
+// 下方同一个位置立刻换成下一题。鼠标和视线都不用移动。
 // ---------------------------------------------------------------
 
 (function (global) {
@@ -10,6 +15,11 @@
   var T = (global.TERRAPOP = global.TERRAPOP || {});
   var U = T.util;
   var t = function (k, v) { return T.i18n.t(k, v); };
+  var DIMS = ["full", "short", "capital", "location"];
+
+  // 上一题的地图画面多留一会儿：下一题如果也要看图，就少留一点
+  var MAP_BEAT_IDLE = 1900;
+  var MAP_BEAT_NEEDED = 900;
 
   // ── 设置 ─────────────────────────────────────────────────────
 
@@ -23,15 +33,13 @@
     timer: "off",
     sound: true,
     motion: true,
-    autoAdvance: true,
-    autoDelay: 1600,
     wikiMode: "bilingual",
+    smartInput: true,
     hintFirstChar: false,
     hintCapital: false,
     hintGroup: false,
     showTerrainLabels: true,
     showLegend: true,
-    smartInput: true,
     voiceAuto: false
   };
 
@@ -44,7 +52,7 @@
     mapView: null,
     session: null,
     question: null,
-    phase: "idle",            // idle | ask | reveal
+    phase: "idle",          // idle | ask | locked
     pending: "",
     pendingRegion: null,
     adjacency: null,
@@ -53,9 +61,8 @@
     lastResult: null,
     timerHandle: null,
     globalDeadline: 0,
-    autoHandle: null,
-    autoRaf: null,
-    revealAt: 0
+    mapGen: 0,
+    beatPending: false
   };
 
   var el = {};
@@ -72,10 +79,6 @@
     return (w && w[id]) || null;
   }
 
-  function regionById(id) {
-    return state.session && state.session.regionById[id];
-  }
-
   function toast(msg, ms) {
     el.toast.textContent = msg;
     el.toast.hidden = false;
@@ -87,7 +90,12 @@
     }, ms || 1800);
   }
 
-  // ── 音效（WebAudio 合成，零素材）────────────────────────────
+  function boardValue(region, dim) {
+    if (dim === "short") return T.game.shortDisplay(region, settings.locale);
+    return T.game.displayFor(region, dim, settings.locale);
+  }
+
+  // ── 音效 ─────────────────────────────────────────────────────
 
   var audioCtx = null;
   function ctx() {
@@ -119,7 +127,6 @@
   function sfx(kind, combo) {
     if (!settings.sound) return;
     if (kind === "correct") {
-      // 连击越高，尾音越高，正反馈拉满
       var bump = Math.min(combo || 1, 8);
       var base = 523.25 * Math.pow(2, (bump - 1) / 12);
       tone(base, 0, 0.13, "triangle", 0.10);
@@ -185,7 +192,11 @@
     }).length;
   }
 
-  // ── 通用 chip 组 ─────────────────────────────────────────────
+  function firstOther(dim) {
+    return DIMS.filter(function (d) { return d !== dim; })[0];
+  }
+
+  // ── chip 组 ──────────────────────────────────────────────────
 
   function buildChips(host, items, current, onPick) {
     U.clear(host);
@@ -201,23 +212,17 @@
     });
   }
 
-  function dimLabel(dim) {
-    return t("dim." + dim) + (dim === "location" ? "" : "");
-  }
-
   // ── 首页 ─────────────────────────────────────────────────────
 
   function buildHome() {
-    var dimItems = ["full", "short", "capital", "location"].map(function (d) {
-      return { value: d, label: t("dim." + d) };
-    }).concat([{ value: "random", label: t("config.random") }]);
+    var dimItems = DIMS.map(function (d) { return { value: d, label: t("dim." + d) }; })
+      .concat([{ value: "random", label: t("config.random") }]);
 
     buildChips(el.knownChips, dimItems, settings.known, function (v) {
       settings.known = v;
       if (v !== "random" && settings.asked === v) settings.asked = firstOther(v);
       persist(); buildHome();
     });
-
     buildChips(el.askedChips, dimItems, settings.asked, function (v) {
       settings.asked = v;
       if (v !== "random" && settings.known === v) settings.known = firstOther(v);
@@ -225,7 +230,6 @@
       else if (settings.style === "locate") settings.style = "text";
       persist(); buildHome();
     });
-
     buildChips(el.styleChips, [
       { value: "text", label: t("style.text") },
       { value: "choice3", label: t("style.choice3"), sub: t("style.easy") },
@@ -238,14 +242,12 @@
       else if (settings.asked === "location") settings.asked = "capital";
       persist(); buildHome();
     });
-
     buildChips(el.scopeChips, SCOPES.map(function (s) {
       return { value: s.id, label: s.id.indexOf("group:") === 0 ? t("group." + s.id.slice(6)) : t(s.key) };
     }), settings.scope, function (v) { settings.scope = v; persist(); buildHome(); });
 
     var n = poolSize();
     el.homeRegionCount.textContent = t("home.regionCount", { n: n });
-
     el.configSummary.textContent = t("config.summary", {
       known: settings.known === "random" ? t("config.random") : t("dim." + settings.known),
       asked: settings.asked === "random" ? t("config.random") : t("dim." + settings.asked),
@@ -254,10 +256,6 @@
     el.configSummary.classList.toggle("tp-config-warn", n === 0);
     el.btnStart.disabled = n === 0;
     if (n === 0) el.configSummary.textContent = t("config.empty");
-  }
-
-  function firstOther(dim) {
-    return ["full", "short", "capital", "location"].filter(function (d) { return d !== dim; })[0];
   }
 
   // ── 地图 ─────────────────────────────────────────────────────
@@ -272,11 +270,11 @@
       var kinds = {};
       (terrain.landforms || []).forEach(function (l) { kinds[l.kind || "plateau"] = 1; });
       ["plateau", "basin", "plain", "desert", "hills"].forEach(function (k) {
-        if (kinds[k]) items.push({ k: k, cls: "tp-lg-" + k, label: t("legend." + k) });
+        if (kinds[k]) items.push({ cls: "tp-lg-" + k, label: t("legend." + k) });
       });
-      if ((terrain.ranges || []).length) items.push({ k: "range", cls: "tp-lg-range", label: t("legend.range") });
-      if ((terrain.rivers || []).length) items.push({ k: "river", cls: "tp-lg-river", label: t("legend.river") });
-      if ((terrain.lakes || []).length) items.push({ k: "lake", cls: "tp-lg-lake", label: t("legend.lake") });
+      if ((terrain.ranges || []).length) items.push({ cls: "tp-lg-range", label: t("legend.range") });
+      if ((terrain.rivers || []).length) items.push({ cls: "tp-lg-river", label: t("legend.river") });
+      if ((terrain.lakes || []).length) items.push({ cls: "tp-lg-lake", label: t("legend.lake") });
     }
     items.forEach(function (it) {
       el.mapLegend.appendChild(U.el("span", { class: "tp-legend-item" }, [
@@ -311,7 +309,7 @@
     buildLegend();
   }
 
-  // ── 开始一局 ─────────────────────────────────────────────────
+  // ── 一局 ─────────────────────────────────────────────────────
 
   function startGame() {
     ensureMap();
@@ -331,12 +329,14 @@
     });
     if (!state.session.total) { toast(t("config.empty")); return; }
 
-    el.scoreBar.hidden = false;
-    el.mapLegend.hidden = !settings.showLegend;
+    state.lastResult = null;
+    state.beatPending = false;
     state.globalDeadline = settings.timer === "global" ? Date.now() + 60000 : 0;
 
+    el.mapLegend.hidden = !settings.showLegend;
     showScreen("play");
     updateHud();
+    renderPrevCard(null);           // 第一题：上方卡片显示玩法说明
     nextQuestion();
   }
 
@@ -344,16 +344,16 @@
     el.screenHome.hidden = name !== "home";
     el.screenPlay.hidden = name !== "play";
     el.screenSummary.hidden = name !== "summary";
-    if (name !== "play") el.scoreBar.hidden = true;
-    if (name === "home") { el.mapLegend.hidden = true; }
+    if (name === "home") el.mapLegend.hidden = true;
   }
 
   function quitToHome() {
-    stopAll();
+    stopTimer();
     T.voice.stop();
     state.session = null;
     state.phase = "idle";
-    hideOverlay(el.wikiOverlay);
+    state.question = null;
+    state.mapGen++;
     if (state.mapView) { state.mapView.setLocked(true); state.mapView.clearMarks(); state.mapView.setShowCapitals(false); }
     showScreen("home");
     buildHome();
@@ -362,18 +362,17 @@
   function updateHud() {
     var s = state.session;
     if (!s) return;
-    el.hudCombo.textContent = String(s.combo);
-    el.comboChip.classList.toggle("tp-stat-hot", s.combo >= 3);
     el.hudScore.textContent = String(s.score);
     el.hudAcc.textContent = s.answeredCount ? Math.round(s.accuracy() * 100) + "%" : "—";
     el.comboBadge.hidden = s.combo < 2;
     el.comboBadge.textContent = t("hud.comboBadge", { n: s.combo });
+    el.comboBadge.classList.toggle("tp-combo-hot", s.combo >= 3);
   }
 
-  // ── 出题 ─────────────────────────────────────────────────────
+  // ── 出题（下半区）────────────────────────────────────────────
 
   function nextQuestion() {
-    stopAll();
+    stopTimer();
     var q = state.session.next();
     if (!q) { finish(); return; }
 
@@ -381,107 +380,85 @@
     state.phase = "ask";
     state.pending = "";
     state.pendingRegion = null;
-    state.lastResult = null;
-
-    el.revealInline.hidden = true;
-    el.revealMemo.textContent = "";
-    el.autoFill.style.width = "0%";
-    el.askCard.hidden = false;
 
     el.qCounter.textContent = t("question.counter", { n: q.index + 1 }) + " / " + state.session.total;
-    el.qProgress.textContent = "";
     el.progressFill.style.width = (q.index / state.session.total * 100) + "%";
 
-    // 题面
-    el.askText.textContent = t("question.prompt", {
-      known: q.known === "location" ? t("dim.location") : t("dim." + q.known),
-      asked: t("dim." + q.asked)
-    });
+    renderCurrent(q);
+    applyHints(q);
 
-    state.mapView.clearMarks();
-    state.mapView.setShowCapitals(settings.hintCapital && q.asked !== "location");
-    state.mapView.setLocked(q.asked !== "location");
-    if (q.known === "location") state.mapView.highlight(q.region.id, "given");
-
-    renderBoard();
-    applyHints();
+    // 地图：默认先锁住；上一题的答案画面留一小会儿再切到本题
+    state.mapView.setLocked(true);
+    var beat = state.beatPending ? (q.asked === "location" ? MAP_BEAT_NEEDED : MAP_BEAT_IDLE) : 0;
+    state.beatPending = false;
+    applyMapState(q, beat);
 
     if (settings.timer === "perQuestion") startTimer(20000);
     else if (settings.timer === "global") startTimer(0);
-
     if (settings.voiceAuto) speakQuestion(q);
 
-    var input = el.infoBoard.querySelector(".tp-answer-input");
+    var input = el.answerArea.querySelector(".tp-answer-input");
     if (input) setTimeout(function () { try { input.focus(); } catch (e) {} }, 20);
   }
 
-  // ── 信息板 ───────────────────────────────────────────────────
-
-  function boardValue(region, dim) {
-    if (dim === "short") return T.game.shortDisplay(region, settings.locale);
-    return T.game.displayFor(region, dim, settings.locale);
+  function applyMapState(q, delay) {
+    var gen = ++state.mapGen;
+    var run = function () {
+      if (gen !== state.mapGen || state.question !== q) return;
+      state.mapView.clearMarks();
+      state.mapView.setShowCapitals(settings.hintCapital && q.asked !== "location");
+      state.mapView.setLocked(q.asked !== "location");
+      if (q.known === "location") state.mapView.highlight(q.region.id, "given");
+    };
+    if (delay > 0) setTimeout(run, delay);
+    else run();
   }
 
-  function renderBoard(result) {
-    var q = state.question;
-    var region = q.region;
-    U.clear(el.infoBoard);
+  function renderCurrent(q) {
+    // 已知信息
+    U.clear(el.knownChip);
+    el.knownChip.appendChild(U.el("em", { text: t("dim." + q.known) }));
+    el.knownChip.appendChild(U.el("b", {
+      text: q.known === "location" ? t("question.knownLocation") : boardValue(q.region, q.known)
+    }));
+    if (q.known === "capital") el.knownChip.appendChild(U.el("small", { text: T.game.termOf(q.region) }));
 
-    ["full", "short", "capital", "location"].forEach(function (dim) {
-      var row = U.el("div", { class: "tp-row", dataset: { dim: dim } });
-      var isKnown = q.known === dim;
-      var isAsked = q.asked === dim;
-      var shown = !!result || isKnown;
+    // 题面
+    el.askText.textContent = q.asked === "location"
+      ? t("question.askLocation")
+      : t("question.prompt", { asked: t("dim." + q.asked) });
 
-      if (isKnown) row.classList.add("tp-row-known");
-      if (isAsked) row.classList.add("tp-row-asked");
-
-      row.appendChild(U.el("span", { class: "tp-row-key", text: t("dim." + dim) }));
-
-      var val = U.el("span", { class: "tp-row-val" });
-
-      if (isKnown) {
-        if (dim === "location") {
-          val.appendChild(U.el("em", { class: "tp-pill tp-pill-given", text: t("question.knownLocation") }));
-        } else {
-          val.appendChild(U.el("b", { text: boardValue(region, dim) }));
-          if (dim === "capital") val.appendChild(U.el("small", { text: T.game.termOf(region) }));
-        }
-      } else if (isAsked && !result) {
-        renderAskControl(region, dim, val);
-      } else if (result) {
-        var ok = result.status === "correct";
-        var close = result.status === "close";
-        val.appendChild(U.el("i", {
-          class: "tp-mark-icon " + (ok ? "tp-ok" : close ? "tp-close-icon" : "tp-bad"),
-          text: ok ? "✓" : close ? "≈" : "✗"
-        }));
-        val.appendChild(U.el("b", { text: boardValue(region, dim) }));
-        if (isAsked && result.given && !ok) {
-          val.appendChild(U.el("s", { class: "tp-given-wrong", text: result.given }));
-        }
-        if (dim === "capital" && region.capitalTerm !== "none") {
-          val.appendChild(U.el("small", { text: T.game.termOf(region) }));
-        }
-      } else {
-        val.appendChild(U.el("span", { class: "tp-hidden", text: t("board.hidden") }));
-      }
-
-      row.appendChild(val);
-      if (shown && result && isAsked) row.classList.add("tp-row-" + result.status);
-      el.infoBoard.appendChild(row);
-    });
+    renderAnswerArea(q);
   }
 
-  function renderAskControl(region, dim, host) {
-    var q = state.question;
-    if (dim === "location") {
-      host.appendChild(U.el("em", { class: "tp-pill tp-pill-ask", text: t("question.askLocation") }));
-      return;
+  function applyHints(q) {
+    U.clear(el.hintBar);
+    var hints = [];
+    if (settings.hintFirstChar && q.asked !== "location") {
+      hints.push(t("question.hintFirst", { v: U.firstChar(boardValue(q.region, q.asked)) }));
     }
+    if (settings.hintGroup && q.asked === "location") hints.push("🧭 " + t("group." + q.region.group));
+    if (settings.hintCapital && q.asked !== "location" && q.region.capital) {
+      hints.push(t("question.hintCapitalMarker", { term: T.game.termOf(q.region) }));
+    }
+    hints.forEach(function (h) { el.hintBar.appendChild(U.el("span", { class: "tp-hint-pill", text: h })); });
+    el.hintBar.classList.toggle("tp-hints-empty", hints.length === 0);
+  }
 
-    if (q.style === "text") {
-      var wrap = U.el("div", { class: "tp-answer-inputwrap" });
+  // ── 作答区（固定高度 / 固定位置）─────────────────────────────
+
+  function renderAnswerArea(q) {
+    U.clear(el.answerArea);
+    var body = U.el("div", { class: "tp-answer-body" });
+    el.answerArea.appendChild(body);
+
+    if (q.asked === "location") {
+      var box = U.el("div", { class: "tp-locate-box" });
+      box.appendChild(U.el("span", { class: "tp-locate-icon", text: "📍" }));
+      box.appendChild(U.el("span", { class: "tp-locate-text", text: t("question.askLocation") }));
+      body.appendChild(box);
+    } else if (q.style === "text") {
+      var row = U.el("div", { class: "tp-input-row" });
       var input = U.el("input", {
         class: "tp-answer-input", type: "text", autocomplete: "off",
         autocapitalize: "off", spellcheck: "false",
@@ -491,79 +468,52 @@
       input.addEventListener("keydown", function (e) {
         if (e.key === "Enter") {
           e.preventDefault();
-          e.stopPropagation();   // 别再冒泡给"下一题"的全局快捷键
-          commitText(true);
+          e.stopPropagation();      // 别冒泡出去
+          commitText();
         }
       });
       var ok = U.el("button", { class: "tp-btn tp-btn-primary tp-btn-sm", text: t("action.submit") });
-      ok.addEventListener("click", function () { commitText(true); });
-      var skip = U.el("button", { class: "tp-btn tp-btn-ghost tp-btn-sm", text: t("action.skip") });
-      skip.addEventListener("click", function () { commit({ kind: "skip" }); });
-      wrap.appendChild(input);
-      wrap.appendChild(ok);
-      wrap.appendChild(skip);
-      host.appendChild(wrap);
-      host.appendChild(U.el("div", { class: "tp-suggest", id: "suggest" }));
-      host.appendChild(U.el("small", { class: "tp-smart-hint", text: settings.smartInput ? t("input.smartHint") : "" }));
-      return;
+      ok.addEventListener("click", commitText);
+      row.appendChild(input);
+      row.appendChild(ok);
+      body.appendChild(row);
+      body.appendChild(U.el("div", { class: "tp-suggest", id: "suggest" }));
+      body.appendChild(U.el("small", { class: "tp-smart-hint", text: settings.smartInput ? t("input.smartHint") : "" }));
+    } else {
+      var grid = U.el("div", { class: "tp-choices" });
+      q.choices.forEach(function (label, i) {
+        var b = U.el("button", { class: "tp-choice", type: "button" }, [
+          U.el("span", { class: "tp-choice-key", text: String(i + 1) }),
+          U.el("span", { class: "tp-choice-text", text: label })
+        ]);
+        b.addEventListener("click", function () { commit({ kind: "choice", value: label }); });
+        grid.appendChild(b);
+      });
+      body.appendChild(grid);
     }
 
-    // 选择题
-    var grid = U.el("div", { class: "tp-choices tp-choices-" + q.choices.length });
-    q.choices.forEach(function (label, i) {
-      var b = U.el("button", { class: "tp-choice", type: "button" }, [
-        U.el("span", { class: "tp-choice-key", text: String(i + 1) }),
-        U.el("span", { class: "tp-choice-text", text: label })
-      ]);
-      b.addEventListener("click", function () { commit({ kind: "choice", value: label }); });
-      grid.appendChild(b);
-    });
-    var wrap2 = U.el("div", { class: "tp-choice-wrap" });
-    wrap2.appendChild(grid);
-    var skip2 = U.el("button", { class: "tp-btn tp-btn-ghost tp-btn-sm tp-skip-inline", text: t("action.skip") });
-    skip2.addEventListener("click", function () { commit({ kind: "skip" }); });
-    wrap2.appendChild(skip2);
-    host.appendChild(wrap2);
-  }
-
-  // 让题目卡里的提示条也占位置
-  function applyHints() {
-    var q = state.question;
-    var hints = [];
-    if (settings.hintFirstChar) {
-      var v = boardValue(q.region, q.asked);
-      if (q.asked !== "location") hints.push(t("question.hintFirst", { v: U.firstChar(v) }));
-    }
-    if (settings.hintGroup && q.asked === "location") hints.push("🧭 " + t("group." + q.region.group));
-    if (settings.hintCapital && q.asked !== "location" && q.region.capital) {
-      hints.push(t("question.hintCapitalMarker", { term: T.game.termOf(q.region) }));
-    }
-    el.askCard.dataset.hints = hints.join("|");
-    var existing = el.askCard.querySelector(".tp-hint-row");
-    if (existing) existing.remove();
-    if (!hints.length) return;
-    var row = U.el("div", { class: "tp-hint-row" });
-    hints.forEach(function (h) { row.appendChild(U.el("span", { class: "tp-hint-pill", text: h })); });
-    el.askCard.appendChild(row);
+    var skip = U.el("button", { class: "tp-btn tp-btn-ghost tp-btn-sm tp-answer-skip", text: t("action.skip") });
+    skip.addEventListener("click", function () { commit({ kind: "skip" }); });
+    el.answerArea.appendChild(skip);
   }
 
   // ── 智能输入 ─────────────────────────────────────────────────
 
   function onInput(e) {
     var q = state.question;
+    if (!q || state.phase !== "ask") return;
     state.pending = e.target.value;
-    var box = el.infoBoard.querySelector("#suggest");
+    var box = el.answerArea.querySelector("#suggest");
     if (!box) return;
     U.clear(box);
 
     if (!state.pending.trim()) { e.target.classList.remove("tp-input-bad"); return; }
-
     if (!settings.smartInput) return;
 
     var m = T.game.matchInput(state.session.pool, q.asked, settings.locale, state.pending);
     if (m.unique) {
       e.target.classList.remove("tp-input-bad");
-      commitText(false);
+      commitText();
       return;
     }
     if (m.kind === "multi") {
@@ -580,14 +530,10 @@
     }
   }
 
-  function commitText(fromButton) {
-    var value = el.infoBoard.querySelector(".tp-answer-input");
-    value = value ? value.value : "";
-    if (!value.trim() && !fromButton) return;
-    commit({ kind: "text", value: value });
+  function commitText() {
+    var input = el.answerArea.querySelector(".tp-answer-input");
+    commit({ kind: "text", value: input ? input.value : "" });
   }
-
-  // ── 位置点选 ─────────────────────────────────────────────────
 
   function onMapPick(regionId) {
     if (state.phase !== "ask") return;
@@ -598,14 +544,14 @@
     commit({ kind: "locate", regionId: regionId });
   }
 
-  // ── 提交 ─────────────────────────────────────────────────────
+  // ── 提交：上一题进卡片，下半区立刻换题 ───────────────────────
 
   function commit(answer) {
     if (state.phase !== "ask") return;
     var q = state.question;
     if (settings.timer === "global") checkGlobalTimeout();
 
-    state.phase = "reveal";
+    state.phase = "locked";
     stopTimer();
     state.mapView.setLocked(true);
 
@@ -616,64 +562,87 @@
     else if (result.close) sfx("close");
     else sfx("wrong");
 
-    if (q.asked === "location") {
-      // 点错时把点到的位置也标出来，方便对照
-      if (!result.correct) {
-        state.mapView.highlight(result.region.id, "given");
-        state.mapView.reveal(result.region, result.correct ? "correct" : "wrong");
-      } else {
-        state.mapView.reveal(result.region, "correct");
-      }
-    } else {
-      state.mapView.reveal(result.region, result.correct ? "correct" : result.close ? "close" : "wrong");
-    }
+    // 地图上把聚光灯打到正确答案——这就是"上一题"留下的画面
+    state.mapView.reveal(result.region, result.correct ? "correct" : result.close ? "close" : "wrong");
 
-    renderBoard(result);
+    renderPrevCard(result);
     updateHud();
-    showRevealInline(result);
     el.progressFill.style.width = ((q.index + 1) / state.session.total * 100) + "%";
 
-    if (settings.autoAdvance) startAutoAdvance();
-    state.revealAt = (global.performance || Date).now();
+    state.beatPending = true;
+    nextQuestion();      // 零阻断：下一题立刻占上同一个位置
   }
 
-  function showRevealInline(result) {
+  // ── 上一题卡片 ───────────────────────────────────────────────
+
+  function renderPrevCard(result) {
+    U.clear(el.prevCard);
+    if (!result) {
+      el.prevCard.classList.remove("tp-prev-answer");
+      el.prevCard.appendChild(U.el("h3", { class: "tp-prev-title", text: t("prev.explainTitle") }));
+      el.prevCard.appendChild(U.el("p", { class: "tp-prev-body", text: t("prev.explainBody") }));
+      return;
+    }
+
     var region = result.region;
-    var v = wikiOf(region.id);
-    var memo = v ? localePick(v.memo, settings.locale) : "";
-    el.revealMemo.textContent = memo || "";
-    el.revealMemo.hidden = !memo;
-    el.revealInline.hidden = false;
-    el.revealInline.classList.toggle("tp-reveal-ok", result.correct);
-    el.revealInline.classList.toggle("tp-reveal-bad", !result.correct && !result.close);
-    el.btnDetail.hidden = false;
-    el.btnNext.textContent = state.session.remaining() > 0 ? t("action.next") : t("action.seeResult");
-  }
+    var cls = result.correct ? "correct" : result.close ? "close" : "wrong";
+    el.prevCard.classList.add("tp-prev-answer");
+    el.prevCard.classList.remove("tp-prev-" + "correct", "tp-prev-close", "tp-prev-wrong");
+    el.prevCard.classList.add("tp-prev-" + cls);
 
-  // ── 自动下一题 ───────────────────────────────────────────────
+    var head = U.el("div", { class: "tp-prev-head" });
+    head.appendChild(U.el("span", { class: "tp-verdict tp-verdict-" + cls, text: t("feedback." + cls) }));
+    head.appendChild(U.el("b", { class: "tp-prev-name", text: localePick(region.fullNames, settings.locale) }));
+    head.appendChild(U.el("span", {
+      class: "tp-prev-your",
+      text: t("prev.yourAnswer") + "：" + (result.given || t("prev.unknown"))
+    }));
+    el.prevCard.appendChild(head);
 
-  function startAutoAdvance() {
-    stopAutoAdvance();
-    var total = settings.autoDelay;
-    var started = performance.now();
-    state.autoRaf = requestAnimationFrame(function step(now) {
-      if (state.phase !== "reveal") return;
-      var p = Math.min(1, (now - started) / total);
-      el.autoFill.style.width = (p * 100) + "%";
-      if (p >= 1) { state.autoRaf = null; nextQuestion(); return; }
-      state.autoRaf = requestAnimationFrame(step);
+    var info = U.el("div", { class: "tp-prev-info" });
+    DIMS.forEach(function (dim) {
+      var cell = U.el("span", {
+        class: "tp-prev-cell" + (dim === result.question.asked ? " tp-prev-cell-asked" : "")
+      });
+      cell.appendChild(U.el("em", { text: t("dim." + dim) }));
+      cell.appendChild(U.el("b", { text: boardValue(region, dim) }));
+      if (dim === "capital" && region.capitalTerm !== "none") {
+        cell.appendChild(U.el("small", { text: T.game.termOf(region) }));
+      }
+      info.appendChild(cell);
     });
+    el.prevCard.appendChild(info);
+
+    var v = wikiOf(region.id);
+    if (v) el.prevCard.appendChild(buildWikiBlock(v));
+    else el.prevCard.appendChild(U.el("p", { class: "tp-wiki-missing", text: t("reveal.wikiMissing") }));
   }
 
-  function stopAutoAdvance() {
-    if (state.autoRaf) { cancelAnimationFrame(state.autoRaf); state.autoRaf = null; }
-    el.autoFill.style.width = "0%";
-  }
-
-  function advanceNow() {
-    if (state.phase !== "reveal") return;
-    stopAutoAdvance();
-    nextQuestion();
+  function buildWikiBlock(v) {
+    var wrap = U.el("div", { class: "tp-wiki" });
+    function section(title, obj, cls) {
+      if (!obj) return;
+      var cur = settings.locale;
+      var other = T.i18n.otherLocale(cur);
+      var locales = settings.wikiMode === "bilingual" ? [cur, other]
+        : settings.wikiMode === "other" ? [other] : [cur];
+      var out = [];
+      locales.forEach(function (l) { if (obj[l] && out.indexOf(l) === -1) out.push(l); });
+      if (!out.length) return;
+      var block = U.el("div", { class: "tp-wiki-section " + (cls || "") });
+      block.appendChild(U.el("h4", { text: title }));
+      out.forEach(function (l) {
+        var line = U.el("p", { class: "tp-wiki-line", lang: l });
+        line.appendChild(U.el("span", { class: "tp-wiki-lang", text: T.i18n.localeLabel(l) }));
+        line.appendChild(U.el("span", { class: "tp-wiki-text", text: obj[l] }));
+        block.appendChild(line);
+      });
+      wrap.appendChild(block);
+    }
+    section("🧠 " + t("reveal.memo"), v.memo, "tp-wiki-memo");
+    section("📌 " + t("reveal.facts"), v.facts, "tp-wiki-facts");
+    section("📖 " + t("reveal.wiki"), v.wiki, "tp-wiki-block");
+    return wrap;
   }
 
   // ── 计时 ─────────────────────────────────────────────────────
@@ -708,8 +677,6 @@
     el.qTimer.hidden = true;
   }
 
-  function stopAll() { stopTimer(); stopAutoAdvance(); }
-
   function checkGlobalTimeout() {
     if (state.globalDeadline && Date.now() >= state.globalDeadline) toast(t("time.up"));
   }
@@ -717,7 +684,7 @@
   // ── 结算 ─────────────────────────────────────────────────────
 
   function finish() {
-    stopAll();
+    stopTimer();
     showScreen("summary");
     var s = state.session;
     var cells = [
@@ -734,116 +701,17 @@
       ]));
     });
     sfx("finish");
-    if (state.mapView) state.mapView.clearMarks();
-  }
-
-  // ── 百科详情 ─────────────────────────────────────────────────
-
-  function openWiki() {
-    var result = state.lastResult;
-    if (!result) return;
-    stopAutoAdvance();
-    var region = result.region;
-    var v = wikiOf(region.id);
-
-    el.wikiBadge.className = "tp-verdict tp-verdict-" + (result.correct ? "correct" : result.close ? "close" : "wrong");
-    el.wikiBadge.textContent = result.correct ? t("feedback.correct") : result.close ? t("feedback.close") : t("feedback.wrong");
-    el.wikiTitle.textContent = localePick(region.fullNames, settings.locale);
-
-    U.clear(el.wikiBody);
-    var info = U.el("div", { class: "tp-reveal-info" });
-    ["full", "short", "capital", "location"].forEach(function (dim) {
-      var card = U.el("div", { class: "tp-info-card" + (dim === state.question.asked ? " tp-info-asked" : "") });
-      card.appendChild(U.el("em", { text: t("dim." + dim) }));
-      card.appendChild(U.el("b", { text: boardValue(region, dim) }));
-      if (dim === "capital" && region.capitalTerm !== "none") {
-        card.appendChild(U.el("span", { class: "tp-info-sub", text: T.game.termOf(region) }));
-      }
-      if (dim === "short") {
-        card.appendChild(U.el("span", { class: "tp-info-sub", text: (region.short || []).map(function (s) { return s.pinyin; }).join(" / ") }));
-      }
-      if (dim === "capital" && region.capitalTerm === "none") {
-        card.appendChild(U.el("span", { class: "tp-info-sub", text: localePick(region.capitalNote, settings.locale) }));
-      }
-      info.appendChild(card);
-    });
-    info.appendChild(U.el("div", { class: "tp-info-card tp-info-meta" }, [
-      U.el("em", { text: t("type." + region.type) }), U.el("b", { text: t("group." + region.group) })
-    ]));
-    el.wikiBody.appendChild(info);
-
-    if (v) el.wikiBody.appendChild(buildWikiBlock(v));
-    else el.wikiBody.appendChild(U.el("p", { class: "tp-wiki-missing", text: t("reveal.wikiMissing") }));
-
-    showOverlay(el.wikiOverlay);
-  }
-
-  function buildWikiBlock(v) {
-    var wrap = U.el("div", { class: "tp-wiki" });
-    function section(title, obj, cls) {
-      if (!obj) return;
-      var cur = settings.locale;
-      var other = T.i18n.otherLocale(cur);
-      var locales = settings.wikiMode === "bilingual" ? [cur, other]
-        : settings.wikiMode === "other" ? [other] : [cur];
-      var out = [];
-      locales.forEach(function (l) { if (obj[l] && out.indexOf(l) === -1) out.push(l); });
-      if (!out.length) return;
-      var block = U.el("div", { class: "tp-wiki-section " + (cls || "") });
-      block.appendChild(U.el("h3", { text: title }));
-      out.forEach(function (l) {
-        var line = U.el("p", { class: "tp-wiki-line", lang: l });
-        line.appendChild(U.el("span", { class: "tp-wiki-lang", text: T.i18n.localeLabel(l) }));
-        line.appendChild(U.el("span", { class: "tp-wiki-text", text: obj[l] }));
-        block.appendChild(line);
-      });
-      wrap.appendChild(block);
-    }
-    section("🧠 " + t("reveal.memo"), v.memo, "tp-wiki-memo");
-    section("📌 " + t("reveal.facts"), v.facts, "tp-wiki-facts");
-    section("📖 " + t("reveal.wiki"), v.wiki, "tp-wiki-block");
-    return wrap;
-  }
-
-  // ── 覆盖层 ───────────────────────────────────────────────────
-
-  function showOverlay(node) {
-    node.hidden = false;
-    requestAnimationFrame(function () { node.classList.add("tp-overlay-show"); });
-  }
-  function hideOverlay(node) {
-    node.classList.remove("tp-overlay-show");
-    setTimeout(function () { node.hidden = true; }, 160);
   }
 
   // ── 语音 ─────────────────────────────────────────────────────
 
   function speakQuestion(q) {
     var parts = [];
-    parts.push(t("question.prompt", {
-      known: q.known === "location" ? t("dim.location") : t("dim." + q.known),
-      asked: t("dim." + q.asked)
-    }));
-    if (q.known !== "location") parts.push(boardValue(q.region, q.known));
-    T.voice.speak(parts.join("。"), settings.locale);
-  }
-
-  function speakReveal() {
-    var r = state.lastResult;
-    if (!r) return;
-    var region = r.region;
-    var parts = [localePick(region.fullNames, settings.locale)];
-    parts.push(t("dim.short") + ": " + (region.short || []).map(function (s) { return s.char; }).join("、"));
-    if (region.capitalTerm !== "none" && region.capital) {
-      parts.push(T.game.termOf(region) + ": " + localePick(region.capital, settings.locale));
-    }
-    var v = wikiOf(region.id);
-    if (v && v.memo) {
-      var langs = settings.wikiMode === "bilingual"
-        ? [settings.locale, T.i18n.otherLocale(settings.locale)]
-        : settings.wikiMode === "other" ? [T.i18n.otherLocale(settings.locale)] : [settings.locale];
-      langs.forEach(function (l) { if (v.memo[l]) parts.push(v.memo[l]); });
-    }
+    if (q.known === "location") parts.push(t("question.knownLocation"));
+    else parts.push(t("dim." + q.known) + ": " + boardValue(q.region, q.known));
+    parts.push(q.asked === "location"
+      ? t("question.askLocation")
+      : t("question.prompt", { asked: t("dim." + q.asked) }));
     T.voice.speak(parts.join("。"), settings.locale);
   }
 
@@ -898,16 +766,9 @@
       { value: "perQuestion", label: t("settings.timer.perQuestion") }
     ], settings.timer, function (v) { settings.timer = v; persist(); buildSettings(); }));
 
-    el.settingsBody.appendChild(group("settings.autoDelay", [
-      { value: "1000", label: t("settings.delay.fast") },
-      { value: "1600", label: t("settings.delay.normal") },
-      { value: "2600", label: t("settings.delay.slow") }
-    ], String(settings.autoDelay), function (v) { settings.autoDelay = parseInt(v, 10); persist(); buildSettings(); }));
-
     var toggles = U.el("div", { class: "tp-set-group" });
     toggles.appendChild(U.el("h3", { text: t("settings.helpers") }));
     toggles.appendChild(toggle("settings.smartInput", settings.smartInput, function (v) { settings.smartInput = v; persist(); }));
-    toggles.appendChild(toggle("settings.autoAdvance", settings.autoAdvance, function (v) { settings.autoAdvance = v; persist(); }));
     toggles.appendChild(toggle("settings.hintFirst", settings.hintFirstChar, function (v) { settings.hintFirstChar = v; persist(); }));
     toggles.appendChild(toggle("settings.hintCapital", settings.hintCapital, function (v) {
       settings.hintCapital = v; persist();
@@ -963,17 +824,11 @@
     buildSettings();
     buildLegend();
     if (state.mapView) state.mapView.setLocale(settings.locale);
-    if (state.phase === "ask" && state.question) {
-      renderBoard();
-      applyHints();
-      el.askText.textContent = t("question.prompt", {
-        known: state.question.known === "location" ? t("dim.location") : t("dim." + state.question.known),
-        asked: t("dim." + state.question.asked)
-      });
-    } else if (state.phase === "reveal" && state.lastResult) {
-      renderBoard(state.lastResult);
-      showRevealInline(state.lastResult);
+    if (state.question && state.phase === "ask") {
+      renderCurrent(state.question);
+      applyHints(state.question);
     }
+    if (state.session) renderPrevCard(state.lastResult);
   }
 
   function buildLangSelect() {
@@ -990,29 +845,21 @@
 
   function cacheEls() {
     ["screenHome", "screenPlay", "screenSummary", "mapHost", "mapLegend",
-      "qCounter", "qProgress", "qTimer", "comboBadge", "progressFill",
-      "askCard", "askText", "infoBoard", "revealInline", "revealMemo", "autoFill",
-      "btnDetail", "btnNext", "btnZoomIn", "btnZoomOut", "btnZoomReset", "btnStart",
+      "qCounter", "qTimer", "comboBadge", "progressFill", "hudScore", "hudAcc",
+      "prevCard", "knownChip", "askText", "hintBar", "answerArea",
+      "btnZoomIn", "btnZoomOut", "btnZoomReset", "btnStart",
       "knownChips", "askedChips", "styleChips", "scopeChips", "configSummary",
       "homeRegionCount", "langSelect", "btnSettings", "btnSettingsClose", "settingsOverlay",
-      "settingsBody", "wikiOverlay", "wikiBody", "wikiBadge", "wikiTitle", "btnWikiClose",
-      "btnWikiSpeak", "btnRestart", "btnHome", "btnQuit", "scoreBar", "hudCombo", "hudAcc",
-      "hudScore", "comboChip", "toast", "summaryBody"
+      "settingsBody", "btnRestart", "btnHome", "btnQuit", "toast", "summaryBody"
     ].forEach(function (id) { el[id] = document.getElementById(id); });
   }
 
   function bind() {
     el.langSelect.addEventListener("change", function () { setLocale(el.langSelect.value); });
-    el.btnSettings.addEventListener("click", function () {
-      buildSettings(); showOverlay(el.settingsOverlay);
-    });
+    el.btnSettings.addEventListener("click", function () { buildSettings(); showOverlay(el.settingsOverlay); });
     el.btnSettingsClose.addEventListener("click", function () { hideOverlay(el.settingsOverlay); });
-    el.btnWikiClose.addEventListener("click", function () { hideOverlay(el.wikiOverlay); });
-    el.btnWikiSpeak.addEventListener("click", speakReveal);
     el.btnStart.addEventListener("click", startGame);
     el.btnQuit.addEventListener("click", quitToHome);
-    el.btnNext.addEventListener("click", advanceNow);
-    el.btnDetail.addEventListener("click", openWiki);
     el.btnZoomIn.addEventListener("click", function () { state.mapView && state.mapView.zoomIn(); });
     el.btnZoomOut.addEventListener("click", function () { state.mapView && state.mapView.zoomOut(); });
     el.btnZoomReset.addEventListener("click", function () { state.mapView && state.mapView.resetView(); });
@@ -1020,29 +867,26 @@
     el.btnHome.addEventListener("click", function () { showScreen("home"); buildHome(); });
 
     document.addEventListener("keydown", function (e) {
-      if (!el.settingsOverlay.hidden || !el.wikiOverlay.hidden) {
-        if (e.key === "Escape") { hideOverlay(el.settingsOverlay); hideOverlay(el.wikiOverlay); }
+      if (!el.settingsOverlay.hidden) {
+        if (e.key === "Escape") hideOverlay(el.settingsOverlay);
         return;
       }
-      if (el.screenPlay.hidden) return;
-
-      if (state.phase === "reveal") {
-        if (e.key === "Enter" || e.key === " " || e.key === "ArrowRight") {
-          e.preventDefault();
-          // 刚用回车/空格提交完的那一下不要立刻被当成"下一题"
-          var now = (global.performance || Date).now();
-          if (state.revealAt && now - state.revealAt < 350) return;
-          advanceNow();
-        }
-        return;
-      }
-      if (state.phase !== "ask") return;
+      if (el.screenPlay.hidden || state.phase !== "ask") return;
       var q = state.question;
       if (q && q.choices && /^[1-5]$/.test(e.key)) {
         var idx = parseInt(e.key, 10) - 1;
         if (q.choices[idx]) { e.preventDefault(); commit({ kind: "choice", value: q.choices[idx] }); }
       }
     });
+  }
+
+  function showOverlay(node) {
+    node.hidden = false;
+    requestAnimationFrame(function () { node.classList.add("tp-overlay-show"); });
+  }
+  function hideOverlay(node) {
+    node.classList.remove("tp-overlay-show");
+    setTimeout(function () { node.hidden = true; }, 160);
   }
 
   function init() {

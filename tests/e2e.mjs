@@ -4,9 +4,12 @@
 // Playwright 是全局安装的开发工具，不是本项目的运行依赖：
 //   NODE_PATH="$(npm root -g)" node tests/e2e.mjs
 //
-// 覆盖：一问一答的信息板 / 智能输入自动判定 / 三种作答方式 / 定位点选 /
-//      就地揭示（不弹窗）/ 自动下一题 / 连击与正确率 / 百科详情 /
-//      玩法矩阵冒烟 / 卡通地图与地貌渲染 / 英文界面 / 设置 / 移动端
+// 重点验收「位置固定 + 零阻断」：
+//   · 第一题上方卡片是玩法说明
+//   · 答完立刻换下一题（无揭示态、无弹窗、无等待），上一题信息落到上方卡片
+//   · 作答区与首个选项的屏幕坐标在多题之间完全一致
+//   · 选择题：问题在上、选项在下
+//   · 已知位置时地图有聚光灯，一眼能看到高亮在哪
 // ---------------------------------------------------------------
 
 import fs from "node:fs";
@@ -45,7 +48,7 @@ page.on("pageerror", e => errors.push("pageerror: " + e.message));
 page.on("requestfailed", r => { if (!/favicon/.test(r.url())) errors.push("requestfailed: " + r.url()); });
 
 await page.goto(pageUrl, { waitUntil: "load" });
-await page.waitForTimeout(400);
+await page.waitForTimeout(350);
 
 // ── 工具 ─────────────────────────────────────────────────────
 async function pickChip(name, value) {
@@ -57,297 +60,259 @@ async function pickChip(name, value) {
   }, [name, value]);
   await page.waitForTimeout(70);
 }
-const rows = () => page.$$eval("#infoBoard .tp-row", els =>
-  els.map(e => ({ dim: e.dataset.dim, cls: e.className, text: e.textContent.trim() })));
-async function rowOf(dim) {
-  return page.evaluate(d => {
-    const r = document.querySelector(`#infoBoard .tp-row[data-dim="${d}"]`);
-    return r ? { text: r.textContent.trim(), hasInput: !!r.querySelector(".tp-answer-input"), hidden: /待揭晓|hidden/.test(r.textContent) } : null;
-  }, dim);
-}
+const head = () => page.textContent("#qCounter");
+const prevInfo = () => page.evaluate(() => ({
+  isAnswer: document.getElementById("prevCard").classList.contains("tp-prev-answer"),
+  title: (document.querySelector("#prevCard .tp-prev-title") || {}).textContent || "",
+  cells: document.querySelectorAll("#prevCard .tp-prev-cell").length,
+  wiki: document.querySelectorAll("#prevCard .tp-wiki-section").length,
+  name: (document.querySelector("#prevCard .tp-prev-name") || {}).textContent || "",
+  verds: (document.querySelector("#prevCard .tp-verdict") || {}).textContent || ""
+}));
+const answerBox = () => page.locator("#answerArea").boundingBox();
 
-// ── 1. 首页配置 ──────────────────────────────────────────────
+// ── 1. 首页 ──────────────────────────────────────────────────
 section("1. 首页：玩法矩阵配置");
-check("标题正确", (await page.title()).includes("TerraPop"));
-check("已知 5 个选项（4 维度 + 随机）", (await page.locator("#knownChips .tp-chip").count()) === 5);
-check("要猜 5 个选项", (await page.locator("#askedChips .tp-chip").count()) === 5);
-check("作答方式 5 个选项（填空/三选一/四选一/五选一/定位）", (await page.locator("#styleChips .tp-chip").count()) === 5);
-check("范围 10 个选项（3 + 7 大区）", (await page.locator("#scopeChips .tp-chip").count()) === 10);
-check("组合摘要会写清「已知什么、猜什么、怎么答」",
-  /已知「位置」/.test(await page.textContent("#configSummary")) && /填空/.test(await page.textContent("#configSummary")),
-  await page.textContent("#configSummary"));
+check("已知 / 要猜 / 作答方式各 5 个选项",
+  (await page.locator("#knownChips .tp-chip").count()) === 5 &&
+  (await page.locator("#askedChips .tp-chip").count()) === 5 &&
+  (await page.locator("#styleChips .tp-chip").count()) === 5);
+check("范围 10 个选项", (await page.locator("#scopeChips .tp-chip").count()) === 10);
 await page.screenshot({ path: path.join(shots, "01-home.png") });
 
-// ── 2. 默认玩法：看位置猜全称（填空 + 智能输入）──────────────
-section("2. 一问一答：看位置猜全称");
+// ── 2. 第一题：上方卡片是玩法说明 ────────────────────────────
+section("2. 开场：上方卡片是玩法说明");
 await pickChip("knownChips", "location");
 await pickChip("askedChips", "full");
 await pickChip("styleChips", "text");
 await page.click("#btnStart");
 await page.waitForSelector("#screenPlay:not([hidden])");
-await page.waitForTimeout(500);
+await page.waitForTimeout(400);
 
-const mapStats = await page.evaluate(() => ({
-  regions: document.querySelectorAll("#mapHost .tp-region-fills [data-id]").length,
-  casing: document.querySelectorAll("#mapHost .tp-region-casing").length,
-  lines: document.querySelectorAll("#mapHost .tp-region-line").length,
-  landBase: document.querySelectorAll("#mapHost .tp-land-base").length,
-  landforms: document.querySelectorAll("#mapHost .tp-landform").length,
-  deserts: document.querySelectorAll("#mapHost .tp-landform-desert").length,
-  ranges: document.querySelectorAll("#mapHost .tp-range").length,
-  rangePeaks: document.querySelectorAll("#mapHost .tp-range path").length,
-  rivers: document.querySelectorAll("#mapHost .tp-river").length,
-  lakes: document.querySelectorAll("#mapHost .tp-lake").length,
-  terrainLabels: document.querySelectorAll("#mapHost .tp-terrain-label").length,
-  legend: document.querySelectorAll("#mapLegend .tp-legend-item").length,
-  inset: document.querySelectorAll("#mapHost .tp-inset").length,
-  magnifier: document.querySelectorAll("#mapHost .tp-magnifier").length
-}));
-check("34 个省级区域 + 白描边层 + 细线层", mapStats.regions === 34 && mapStats.casing === 34 && mapStats.lines === 34,
-  `${mapStats.regions}/${mapStats.casing}/${mapStats.lines}`);
-check("陆地剪影层存在（用于地貌裁剪与投影）", mapStats.landBase === 1);
-check("面状地貌已渲染（高原/盆地/平原等）", mapStats.landforms >= 12, String(mapStats.landforms));
-check("包含沙漠纹理", mapStats.deserts >= 1);
-check("山脉已渲染（含山形符号）", mapStats.ranges >= 12 && mapStats.rangePeaks >= 40,
-  `${mapStats.ranges} 条 / ${mapStats.rangePeaks} 个山形`);
-check("大江大河已渲染 ≥ 8 条", mapStats.rivers >= 8, String(mapStats.rivers));
-check("大湖已渲染 ≥ 10 个", mapStats.lakes >= 10, String(mapStats.lakes));
-check("地貌标注文字已绘制", mapStats.terrainLabels >= 20, String(mapStats.terrainLabels));
-check("地图图例显示 8 类地貌", mapStats.legend === 8, String(mapStats.legend));
-check("南海诸岛插图框与港澳放大框都在", mapStats.inset === 1 && mapStats.magnifier === 1);
-
-const board1 = await rows();
-check("信息板有 4 行（全称/简称/省会/位置）", board1.length === 4, board1.map(r => r.dim).join(","));
-check("已知维度直接显示（位置：已在地图上标出）", (await rowOf("location")).text.includes("已在地图上标出"));
-check("要猜的维度就地给输入框（不弹窗）", (await rowOf("full")).hasInput);
-check("其余两个维度先隐藏为「待揭晓」", (await rowOf("short")).hidden && (await rowOf("capital")).hidden);
-check("没有弹窗挡在前面", await page.isHidden("#wikiOverlay"));
+const first = await prevInfo();
+check("第一题上方卡片标题是「怎么玩」", first.title.includes("怎么玩") && !first.isAnswer, JSON.stringify(first.title));
+check("上方卡片里是说明文字而不是答案", (await page.textContent("#prevCard")).length > 40);
+check("当前题给出已知信息", (await page.textContent("#knownChip")).includes("已在地图上圈出"));
+check("题面就是当前要答的维度", (await page.textContent("#askText")).includes("全称"));
+check("作答区就是填空控件", (await page.locator("#answerArea .tp-answer-input").count()) === 1);
 await page.screenshot({ path: path.join(shots, "02-play.png") });
 
-// ── 3. 智能输入：拼音首字母无歧义自动判定（不用回车）────────
-section("3. 智能输入：拼音首字母自动判定");
+// ── 3. 零阻断：答完立刻换下一题 ──────────────────────────────
+section("3. 零阻断：答完题立刻换下一题");
 const targetId = await page.evaluate(() => {
-  const mark = document.querySelector("#mapHost .tp-marks .tp-mark");
-  const d = mark.getAttribute("d");
+  const d = document.querySelector("#mapHost .tp-marks .tp-mark").getAttribute("d");
   return window.TERRAPOP.maps.cn.regions.find(x => x.d === d).id;
 });
-const expect = await page.evaluate(id => {
-  const c = window.TERRAPOP.countries.cn.regions.find(r => r.id === id);
-  return { full: c.fullNames["zh-Hans"], name: c.names["zh-Hans"], short: c.short.map(s => s.char).join("/"), capital: c.capitalTerm === "none" ? null : c.capital["zh-Hans"] };
-}, targetId);
-const initials = await page.evaluate(name => window.TERRAPOP.util.initialsOf(name), expect.name);
-check("能从图上反查题目省份", !!targetId, `${targetId} → 首字母 ${initials}`);
-
-const input = page.locator("#infoBoard .tp-answer-input");
-check("输入框提示里说明了支持拼音首字母", /拼音首字母/.test(await input.getAttribute("placeholder")));
-
-// 先算一下这串首字母在当前题库里是不是无歧义，据此断言"自动判定"或"给候选"
+const expectName = await page.evaluate(id => window.TERRAPOP.countries.cn.regions.find(r => r.id === id).names["zh-Hans"], targetId);
+const initials = await page.evaluate(n => window.TERRAPOP.util.initialsOf(n), expectName);
 const m0 = await page.evaluate(([ini, dim]) =>
-  window.TERRAPOP.game.matchInput(window.TERRAPOP.countries.cn.regions, dim, "zh-Hans", ini),
-  [initials, "full"]);
-console.log(`    · ${expect.name} 的首字母 ${initials} → ${m0.kind}（${m0.candidates.length} 个候选）`);
+  window.TERRAPOP.game.matchInput(window.TERRAPOP.countries.cn.regions, dim, "zh-Hans", ini), [initials, "full"]);
+console.log(`    · ${expectName} 的首字母 ${initials} → ${m0.kind}（${m0.candidates.length} 个候选）`);
+const beforeHead = await head();
 
-await input.pressSequentially(initials, { delay: 15 });
-await page.waitForTimeout(350);
-
+// 打首字母：无歧义时应当在同一 tick 内自动判定并换题；有歧义时给候选、点一下也能立刻换题
+const box = await page.locator("#answerArea .tp-answer-input").boundingBox();
+const headAfterTyping = [];
+for (const ch of initials) {
+  await page.keyboard.type(ch, { delay: 10 });
+  const h = await head();          // 不等待、立刻读
+  headAfterTyping.push(h);
+  if (h !== beforeHead) break;     // 已经判定并换题，别再往新题的输入框里打字
+}
 if (m0.unique) {
-  check("无歧义时打完首字母就直接判定（未按回车）", await page.isVisible("#revealInline"));
+  check("输入无歧义时立即判定并直接换题（同一 tick，无需等待）",
+    headAfterTyping.some(h => h !== beforeHead), `${beforeHead} → ${headAfterTyping.join(" → ")}`);
 } else {
-  check("有歧义时不硬判，而是弹出候选", (await page.locator("#suggest .tp-suggest-item").count()) >= 2);
-  const clicked = await page.evaluate(name => {
-    const items = [...document.querySelectorAll("#suggest .tp-suggest-item")];
-    const hit = items.find(b => b.textContent.trim() === name);
-    if (hit) { hit.click(); return true; }
-    return false;
-  }, expect.full);
-  check("候选里能点到正确项", clicked);
-  await page.waitForTimeout(300);
+  check("有歧义时不硬判，而是给候选", headAfterTyping[headAfterTyping.length - 1] === beforeHead &&
+    (await page.locator("#suggest .tp-suggest-item").count()) >= 2);
+  await page.evaluate(name => {
+    const hit = [...document.querySelectorAll("#suggest .tp-suggest-item")]
+      .find(b => b.textContent.trim().indexOf(name) === 0 || name.indexOf(b.textContent.trim()) === 0);
+    if (hit) hit.click();
+  }, expectName);
+  check("点候选即提交并立刻换题", (await head()) !== beforeHead);
 }
-check("提交后进入揭示态", await page.isVisible("#revealInline"));
-const beforeQ = await page.textContent("#qCounter");
+const afterHead = await head();
+check("没有出现任何弹窗", await page.isHidden("#settingsOverlay"));
+check("作答区已经换成新题的控件，不需要点「下一题」",
+  (await page.locator("#answerArea .tp-answer-input").count()) === 1);
+void box;
 
-check("地图上出现答案高亮", (await page.locator("#mapHost .tp-mark-correct").count()) +
-  (await page.locator("#mapHost .tp-mark-wrong").count()) >= 1);
-check("判为答对", /tp-reveal-ok/.test(await page.getAttribute("#revealInline", "class")),
-  await page.getAttribute("#revealInline", "class"));
-const done = await rows();
-check("揭示后四条信息全部展示出来", done.every(r => !/待揭晓/.test(r.text)) && done.length === 4,
-  done.map(r => r.dim + "=" + r.text.slice(0, 16)).join(" | "));
-check("揭示后仍无弹窗（就地展示）", await page.isHidden("#wikiOverlay"));
-check("HUD 显示连击 / 正确率 / 得分", (await page.textContent("#hudCombo")) !== "1" ||
-  (await page.textContent("#hudScore")) !== "0", `连击 ${await page.textContent("#hudCombo")} · 正确率 ${await page.textContent("#hudAcc")} · 得分 ${await page.textContent("#hudScore")}`);
-await page.screenshot({ path: path.join(shots, "03-reveal-inline.png") });
+const p1 = await prevInfo();
+check("上一题的信息落到了上方卡片", p1.isAnswer && p1.cells === 4, JSON.stringify({ cells: p1.cells, isAnswer: p1.isAnswer }));
+check("上方卡片写明判对 / 判错", p1.verds.includes("答对") || p1.verds.includes("答错"), p1.verds);
+check("上方卡片含记忆点 / 趣味知识 / 小百科三段", p1.wiki === 3, String(p1.wiki));
+check("上方卡片显示正确答案的全称", p1.name.length > 0, p1.name);
+await page.screenshot({ path: path.join(shots, "03-after-answer.png") });
 
-// ── 4. 答完自动进入下一题 ────────────────────────────────────
-section("4. 答完自动进入下一题");
-await page.waitForTimeout(2400);
-const afterQ = await page.textContent("#qCounter");
-check("等待揭示停留时长后自动切到下一题", beforeQ !== afterQ, `${beforeQ} → ${afterQ}`);
-check("新题回到作答状态（输入框重新出现、揭示区收起）",
-  (await page.locator("#infoBoard .tp-answer-input").count()) === 1 && await page.isHidden("#revealInline"));
-
-// ── 4b. 首字母有歧义时给候选，而不是硬判 ─────────────────────
-section("4b. 首字母有歧义时给出候选（智能输入的另一半）");
-const amb = await page.evaluate(() => {
-  const all = window.TERRAPOP.countries.cn.regions;
-  for (const q of ["hn", "hb", "ji", "sh"]) {
-    const m = window.TERRAPOP.game.matchInput(all, "full", "zh-Hans", q);
-    if (m.kind === "multi" && m.candidates.length >= 2) return { q, ids: m.candidates };
-  }
-  return null;
-});
-check("能构造出一个有歧义的首字母串", !!amb, JSON.stringify(amb));
-if (amb) {
-  await page.locator("#infoBoard .tp-answer-input").pressSequentially(amb.q, { delay: 12 });
-  await page.waitForTimeout(250);
-  const n = await page.locator("#suggest .tp-suggest-item").count();
-  check(`输入「${amb.q}」不硬判，而是列出候选`, n >= 2 && await page.isHidden("#revealInline"), `候选 ${n} 个`);
-  check("候选里含该串对应的所有可能省份", (await page.textContent("#suggest")).length > 0);
-  await page.screenshot({ path: path.join(shots, "03b-ambiguous.png") });
-  await page.locator("#suggest .tp-suggest-item").first().click();
-  await page.waitForTimeout(250);
-  check("点候选即可提交", await page.isVisible("#revealInline"));
+// ── 4. 位置固定 ──────────────────────────────────────────────
+section("4. 位置固定：多题之间作答区坐标完全一致");
+const box0 = await answerBox();
+const boxes = [box0];
+for (let i = 0; i < 5; i++) {
+  await page.locator("#answerArea .tp-answer-input").fill("测试" + i);
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(60);
+  boxes.push(await answerBox());
 }
+const same = boxes.every(b => Math.abs(b.y - box0.y) < 1 && Math.abs(b.x - box0.x) < 1 &&
+  Math.abs(b.height - box0.height) < 1 && Math.abs(b.width - box0.width) < 1);
+check("连续 6 题的作答区位置与尺寸完全一致", same,
+  boxes.map(b => `${Math.round(b.x)},${Math.round(b.y)} ${Math.round(b.width)}x${Math.round(b.height)}`).join(" | "));
+check("答错时上方卡片也照常更新", (await prevInfo()).isAnswer);
 
-// ── 5. 填空题也能直接敲回车提交 ──────────────────────────────
-section("5. 填空题回车提交");
-await page.waitForSelector("#infoBoard .tp-answer-input", { timeout: 8000 });
-await page.locator("#infoBoard .tp-answer-input").fill("乱写ABC");
-await page.keyboard.press("Enter");
-await page.waitForTimeout(250);
-check("回车即提交并揭示", await page.isVisible("#revealInline"));
-check("答错时信息板标出正确值", (await page.locator("#infoBoard .tp-row-wrong").count()) >= 1);
-check("答错时给出记忆点/正确值", (await page.textContent("#infoBoard")).length > 0);
-await page.screenshot({ path: path.join(shots, "04-wrong.png") });
-
-// ── 6. 纯文字组合：简称 → 省会（四选一）──────────────────────
-section("6. 纯文字组合：已知简称猜省会（四选一）");
+// ── 5. 选择题：问题在上、选项在下 ────────────────────────────
+section("5. 选择题：问题在上，选项在下");
 await page.click("#btnQuit");
-await page.waitForTimeout(200);
+await page.waitForTimeout(150);
 await pickChip("knownChips", "short");
 await pickChip("askedChips", "capital");
 await pickChip("styleChips", "choice4");
 await page.click("#btnStart");
-await page.waitForTimeout(350);
-check("题面写的是「已知简称，请说出省会」", /已知「简称」/.test(await page.textContent("#askText")) && /省会/.test(await page.textContent("#askText")),
-  await page.textContent("#askText"));
-check("这题没有位置参与（地图不抢点击）", (await rowOf("location")).hidden);
-check("给出 4 个选项", (await page.locator("#infoBoard .tp-choice").count()) === 4);
-const choiceKeys = await page.$$eval("#infoBoard .tp-choice .tp-choice-key", els => els.map(e => e.textContent));
-check("选项带 1-4 快捷键编号", choiceKeys.join(",") === "1,2,3,4", choiceKeys.join(","));
-await page.locator("#infoBoard .tp-choice").first().click();
 await page.waitForTimeout(300);
-check("点选项即提交并揭示", await page.isVisible("#revealInline"));
-const r6 = await rows();
-check("揭示后 4 条信息补齐", r6.every(r => !/待揭晓/.test(r.text)));
+check("选出 4 个选项", (await page.locator("#answerArea .tp-choice").count()) === 4);
+const askBox = await page.locator("#askText").boundingBox();
+const chipBox = await page.locator("#knownChip").boundingBox();
+const firstChoice = await page.locator("#answerArea .tp-choice").first().boundingBox();
+check("题面在选项上方", askBox.y + askBox.height <= firstChoice.y, `题面底 ${Math.round(askBox.y + askBox.height)} ≤ 选项顶 ${Math.round(firstChoice.y)}`);
+check("已知信息在题面上方", chipBox.y + chipBox.height <= askBox.y + 1);
+check("选项排成固定两列", (await page.$$eval("#answerArea .tp-choice", els => {
+  const ys = els.map(e => Math.round(e.getBoundingClientRect().top));
+  return new Set(ys).size <= 2;
+})) === true);
+
+// 记录首个选项坐标，看看下一题是否一样
+const choiceY = [firstChoice.y];
+await page.keyboard.press("1");
+await page.waitForTimeout(80);
+choiceY.push((await page.locator("#answerArea .tp-choice").first().boundingBox()).y);
+const choiceY2 = [choiceY[1]];
+for (let i = 0; i < 3; i++) {
+  await page.keyboard.press(String((i % 4) + 1));
+  await page.waitForTimeout(80);
+  choiceY2.push((await page.locator("#answerArea .tp-choice").first().boundingBox()).y);
+}
+check("数字键 1-5 可以直接选，且首个选项位置固定",
+  choiceY2.every(y => Math.abs(y - choiceY2[0]) < 1), choiceY2.map(Math.round).join(","));
 await page.screenshot({ path: path.join(shots, "05-choice.png") });
 
-// ── 7. 定位模式：已知全称，点地图找位置 ──────────────────────
-section("7. 定位模式：点地图作答");
+// ── 6. 定位题：点地图 ────────────────────────────────────────
+section("6. 定位题：点地图作答");
 await page.click("#btnQuit");
-await page.waitForTimeout(200);
+await page.waitForTimeout(150);
 await pickChip("knownChips", "full");
 await pickChip("askedChips", "location");
-await page.waitForTimeout(100);
-check("选「要猜=位置」时作答方式自动切到定位", (await page.locator("#styleChips .tp-chip-on").textContent()).includes("定位"));
+await page.waitForTimeout(80);
+check("要猜位置时作答方式自动切到定位", (await page.locator("#styleChips .tp-chip-on").textContent()).includes("定位"));
 await page.click("#btnStart");
-await page.waitForTimeout(400);
-
-const target7 = await page.evaluate(() => {
-  const known = document.querySelector("#infoBoard .tp-row[data-dim='full']").textContent;
+await page.waitForTimeout(300);
+check("作答区显示「点地图选答案」", /点地图选答案/.test(await page.textContent("#answerArea")));
+const target6 = await page.evaluate(() => {
+  const known = document.querySelector("#knownChip").textContent;
   const c = window.TERRAPOP.countries.cn.regions.find(r => known.includes(r.fullNames["zh-Hans"]) || known.includes(r.names["zh-Hans"]));
   return c ? c.id : null;
 });
-check("已知维度显示出全称", !!target7, String(target7));
-check("位置行提示「点地图选答案」", /点地图选答案/.test((await rowOf("location")).text));
 const pt = await page.evaluate(id => {
   const p = document.getElementById("tp-r-" + id);
   const c = window.TERRAPOP.maps.cn.regions.find(r => r.id === id).center;
   const m = p.getScreenCTM();
   const q = new DOMPoint(c[0], c[1]).matrixTransform(m);
   return [q.x, q.y];
-}, target7);
+}, target6);
 await page.mouse.move(pt[0], pt[1]);
 await page.mouse.down();
 await page.mouse.up();
-await page.waitForTimeout(300);
-check("点地图即提交并揭示", await page.isVisible("#revealInline"));
-check("点对了会判定为答对", /tp-reveal-ok/.test(await page.getAttribute("#revealInline", "class")) ||
-  (await page.locator("#infoBoard .tp-row-correct").count()) >= 1);
-await page.screenshot({ path: path.join(shots, "06-locate.png") });
+await page.waitForTimeout(120);
+const p6 = await prevInfo();
+check("点地图即提交并立刻换题", p6.isAnswer && p6.name.length > 0, p6.name);
+check("点对了判为答对", p6.verds.includes("答对"), p6.verds);
 
-// ── 8. 百科详情（可选弹窗）───────────────────────────────────
-section("8. 百科详情弹窗（双语）");
-await page.click("#btnDetail");
-await page.waitForSelector("#wikiOverlay:not([hidden])");
-await page.waitForTimeout(250);
-check("详情里有四条信息卡", (await page.locator("#wikiBody .tp-info-card").count()) === 5);
-check("详情里有记忆点 / 趣味知识 / 小百科三段", (await page.locator("#wikiBody .tp-wiki-section").count()) === 3);
-const langs = await page.$$eval("#wikiBody .tp-wiki-lang", els => els.map(e => e.textContent));
-check("默认双语并排", langs.filter(l => l === "简体中文").length === 3 && langs.filter(l => l === "English").length === 3, langs.join(","));
-await page.screenshot({ path: path.join(shots, "07-wiki.png") });
-await page.keyboard.press("Escape");
-await page.waitForTimeout(250);
-check("Esc 可以关掉详情", await page.isHidden("#wikiOverlay"));
+// ── 7. 地图：低调配色 + 聚光灯 ───────────────────────────────
+section("7. 地图：低调配色与聚光灯");
+await page.click("#btnQuit");
+await page.waitForTimeout(150);
+await pickChip("knownChips", "location");
+await pickChip("askedChips", "capital");
+await pickChip("styleChips", "choice4");
+await page.click("#btnStart");
+await page.waitForTimeout(400);
+const mapStats = await page.evaluate(() => ({
+  regions: document.querySelectorAll("#mapHost .tp-region-fills [data-id]").length,
+  spotOn: !!document.querySelector("#mapHost .tp-spot-on"),
+  givenMark: document.querySelectorAll("#mapHost .tp-mark-given").length,
+  halo: document.querySelectorAll("#mapHost .tp-mark-halo").length,
+  landforms: document.querySelectorAll("#mapHost .tp-landform").length,
+  ranges: document.querySelectorAll("#mapHost .tp-range path").length,
+  rivers: document.querySelectorAll("#mapHost .tp-river").length,
+  lakes: document.querySelectorAll("#mapHost .tp-lake").length,
+  labels: [...document.querySelectorAll("#mapHost .tp-terrain-label")].map(e => e.textContent),
+  typeLabels: document.querySelectorAll("#mapHost .tp-tl-type").length
+}));
+check("34 个省级区域", mapStats.regions === 34);
+check("已知位置时亮起聚光灯", mapStats.spotOn);
+check("目标省有高亮描边 + 脉动光环", mapStats.givenMark === 1 && mapStats.halo === 1);
+check("地貌仍然完整（面状 / 山脉 / 河流 / 湖泊）",
+  mapStats.landforms >= 12 && mapStats.ranges >= 40 && mapStats.rivers >= 8 && mapStats.lakes >= 10,
+  `${mapStats.landforms}/${mapStats.ranges}/${mapStats.rivers}/${mapStats.lakes}`);
+check("面状地貌只标类型名（高原/盆地/平原/沙漠/丘陵）", mapStats.typeLabels >= 10, String(mapStats.typeLabels));
+const badLabels = mapStats.labels.filter(l => /四川|内蒙古|青藏|云贵|青海|滇|黑龙江|雅鲁藏布|秦岭/.test(l));
+check("图上没有任何会泄露省份的标注", badLabels.length === 0, badLabels.join(","));
+check("会泄露的山河名也没被标出来（黑龙江/雅鲁藏布江/青海湖/滇池/秦岭）",
+  !mapStats.labels.some(l => ["黑龙江", "雅鲁藏布江", "青海湖", "滇池", "秦岭"].includes(l)));
+await page.screenshot({ path: path.join(shots, "07-map-spotlight.png") });
 
-// ── 9. 地图缩放 ──────────────────────────────────────────────
-section("9. 地图缩放与平移");
+// ── 8. 缩放 ──────────────────────────────────────────────────
+section("8. 地图缩放");
 const t0 = await page.getAttribute("#mapHost .tp-viewport", "transform");
 await page.click("#btnZoomIn");
 await page.waitForTimeout(150);
-const t1 = await page.getAttribute("#mapHost .tp-viewport", "transform");
-check("放大按钮改变视图变换", t0 !== t1, `${t0} → ${t1}`);
+check("放大按钮改变视图变换", t0 !== (await page.getAttribute("#mapHost .tp-viewport", "transform")));
 await page.click("#btnZoomReset");
 await page.waitForTimeout(150);
 check("复位按钮还原视图", (await page.getAttribute("#mapHost .tp-viewport", "transform")).startsWith("translate(0 0) scale(1)"));
 
-// ── 10. 英文界面 ─────────────────────────────────────────────
-section("10. 英文界面");
+// ── 9. 英文界面 ──────────────────────────────────────────────
+section("9. 英文界面");
 await page.click("#btnQuit");
-await page.waitForTimeout(200);
+await page.waitForTimeout(150);
 await page.selectOption("#langSelect", "en");
 await page.waitForTimeout(300);
 check("首页说明切到英文", /One question at a time/.test(await page.textContent(".tp-tagline")));
-check("图例切到英文", /Plateau/.test(await page.textContent("#mapLegend")));
 await pickChip("knownChips", "location");
 await pickChip("askedChips", "full");
+await pickChip("styleChips", "text");
 await page.click("#btnStart");
-await page.waitForTimeout(400);
-check("题面为英文", /Given the/.test(await page.textContent("#askText")), await page.textContent("#askText"));
+await page.waitForTimeout(350);
+check("第一题上方卡片是英文说明", (await prevInfo()).title.includes("How to play"));
+check("题面为英文", /What is its/.test(await page.textContent("#askText")));
 const enTarget = await page.evaluate(() => {
   const d = document.querySelector("#mapHost .tp-marks .tp-mark").getAttribute("d");
   return window.TERRAPOP.maps.cn.regions.find(x => x.d === d).id;
 });
 const enName = await page.evaluate(id => window.TERRAPOP.countries.cn.regions.find(r => r.id === id).fullNames["zh-Hans"], enTarget);
-await page.locator("#infoBoard .tp-answer-input").fill(enName);
+await page.locator("#answerArea .tp-answer-input").fill(enName);
 await page.keyboard.press("Enter");
-await page.waitForTimeout(250);
-check("英文界面下答中文名称也算对（跨语言宽容）", /tp-reveal-ok/.test(await page.getAttribute("#revealInline", "class")));
-await page.screenshot({ path: path.join(shots, "08-english.png") });
+await page.waitForTimeout(150);
+check("英文界面下答中文名也算对", (await prevInfo()).verds.includes("Correct"), (await prevInfo()).verds);
+await page.screenshot({ path: path.join(shots, "09-english.png") });
 
-// ── 11. 设置面板 ─────────────────────────────────────────────
-section("11. 设置面板");
+// ── 10. 设置面板 ─────────────────────────────────────────────
+section("10. 设置面板");
 await page.click("#btnQuit");
 await page.waitForTimeout(150);
 await page.click("#btnSettings");
 await page.waitForSelector("#settingsOverlay:not([hidden])");
-check("设置面板有 7 组", (await page.locator("#settingsBody .tp-set-group").count()) === 7,
+check("设置面板有 6 组", (await page.locator("#settingsBody .tp-set-group").count()) === 6,
   String(await page.locator("#settingsBody .tp-set-group").count()));
-check("开关项 ≥ 10 个", (await page.locator("#settingsBody .tp-toggle").count()) >= 10);
-await page.screenshot({ path: path.join(shots, "09-settings.png") });
-// 关掉自动下一题，方便接下来做矩阵冒烟
-await page.evaluate(() => {
-  const boxes = [...document.querySelectorAll("#settingsBody .tp-toggle")];
-  const target = boxes.find(b => /自动进入下一题|Advance automatically/.test(b.textContent));
-  if (target && target.querySelector("input").checked) target.querySelector("input").click();
-});
-await page.waitForTimeout(120);
+check("不再有「自动下一题 / 停留时长」这类会造成等待的设置",
+  !/自动进入下一题|Advance automatically|停留时长|dwell/.test(await page.textContent("#settingsBody")));
+await page.screenshot({ path: path.join(shots, "10-settings.png") });
 await page.click("#btnSettingsClose");
 await page.waitForTimeout(200);
 check("设置面板可关闭", await page.isHidden("#settingsOverlay"));
 
-// ── 12. 玩法矩阵冒烟：12 组合 × 3 作答方式 ───────────────────
-section("12. 玩法矩阵冒烟（12 组合 × 3 作答方式）");
+// ── 11. 玩法矩阵冒烟：12 组合 × 3 作答方式 ───────────────────
+section("11. 玩法矩阵冒烟（12 组合 × 3 作答方式）");
 const problems = [];
 let combos = 0;
 const DIMS = ["full", "short", "capital", "location"];
@@ -356,74 +321,65 @@ for (const style of ["text", "choice3", "choice4"]) {
     for (const asked of DIMS) {
       if (known === asked) continue;
       combos++;
+      const tag = `${known}->${asked}/${style}`;
       await pickChip("knownChips", known);
       await pickChip("askedChips", asked);
       if (asked !== "location") await pickChip("styleChips", style);
       await page.click("#btnStart");
-      await page.waitForTimeout(120);
-      const r = await page.evaluate(dim => {
-        const q = document.querySelector(`#infoBoard .tp-row[data-dim="${dim}"] .tp-row-val`);
-        return q ? q.textContent.trim() : null;
-      }, asked);
-      if (!r) { problems.push(`${known}->${asked}/${style}: 没有作答行`); await page.click("#btnQuit"); continue; }
-      const tag = `${known}->${asked}/${style}`;
+      await page.waitForTimeout(140);
+
+      const h0 = await head();
       if (asked === "location") {
-        if (!/点地图选答案|Click the map/.test(r)) problems.push(tag + ": 位置行不是点击提示");
-      } else if (style === "text") {
-        if ((await page.locator("#infoBoard .tp-answer-input").count()) !== 1) problems.push(tag + ": 缺输入框");
-      } else {
-        const n = style === "choice3" ? 3 : 4;
-        if ((await page.locator("#infoBoard .tp-choice").count()) !== n) problems.push(tag + `: 选项数不是 ${n}`);
-      }
-      // 完成一次提交，确认整条链路
-      if (asked === "location") {
-        // 位置题：用"已验证落在轮廓内"的质心点随便点一个省，只为走通链路
+        if (!/点地图选答案|Click the map/.test(await page.textContent("#answerArea"))) problems.push(tag + ": 位置行不是点击提示");
+        await page.waitForTimeout(1000);   // 等上一题的聚光灯退场后地图才可点
         const anyId = await page.evaluate(() => window.TERRAPOP.maps.cn.regions[0].id);
-        const pt = await page.evaluate(id => {
-          const p = document.getElementById("tp-r-" + id);
+        const p = await page.evaluate(id => {
+          const el = document.getElementById("tp-r-" + id);
           const c = window.TERRAPOP.maps.cn.regions.find(r => r.id === id).center;
-          const m = p.getScreenCTM();
+          const m = el.getScreenCTM();
           const q = new DOMPoint(c[0], c[1]).matrixTransform(m);
           return [q.x, q.y];
         }, anyId);
-        await page.mouse.move(pt[0], pt[1]);
-        await page.mouse.down();
-        await page.mouse.up();
+        await page.mouse.move(p[0], p[1]); await page.mouse.down(); await page.mouse.up();
       } else if (style === "text") {
-        await page.locator("#infoBoard .tp-answer-input").fill("测试");
+        if ((await page.locator("#answerArea .tp-answer-input").count()) !== 1) problems.push(tag + ": 缺输入框");
+        await page.locator("#answerArea .tp-answer-input").fill("测试");
         await page.keyboard.press("Enter");
       } else {
-        await page.locator("#infoBoard .tp-choice").first().click();
+        const n = style === "choice3" ? 3 : 4;
+        if ((await page.locator("#answerArea .tp-choice").count()) !== n) problems.push(tag + `: 选项数不是 ${n}`);
+        await page.locator("#answerArea .tp-choice").first().click();
       }
-      await page.waitForTimeout(180);
-      if (!(await page.isVisible("#revealInline"))) problems.push(tag + ": 提交后没有揭示");
-      const rowCount = (await rows()).length;
-      if (rowCount !== 4) problems.push(tag + `: 信息板行数 ${rowCount}`);
+      await page.waitForTimeout(120);
+      if (h0 === (await head())) problems.push(tag + ": 提交后没有立刻换题");
+      if (!(await prevInfo()).isAnswer) problems.push(tag + ": 上一题信息没进上方卡片");
+      if ((await prevInfo()).cells !== 4) problems.push(tag + ": 上方卡片缺信息");
       await page.click("#btnQuit");
-      await page.waitForTimeout(80);
+      await page.waitForTimeout(60);
     }
   }
 }
-check(`12 组合 × 3 作答方式 = ${combos} 种配置都能出题、作答、揭示`, problems.length === 0, problems.slice(0, 6).join(" | "));
+check(`12 组合 × 3 作答方式 = ${combos} 种配置都能出题、零阻断作答、信息回填`, problems.length === 0,
+  problems.slice(0, 6).join(" | "));
 
-// ── 13. 移动端布局 ───────────────────────────────────────────
-section("13. 移动端布局");
+// ── 12. 移动端 ───────────────────────────────────────────────
+section("12. 移动端布局");
 await page.setViewportSize({ width: 390, height: 844 });
-await page.waitForTimeout(300);
+await page.waitForTimeout(250);
 await pickChip("knownChips", "location");
 await pickChip("askedChips", "full");
 await pickChip("styleChips", "text");
 await page.click("#btnStart");
-await page.waitForTimeout(400);
+await page.waitForTimeout(350);
 const mapBox = await page.locator(".tp-map-pane").boundingBox();
 const panelBox = await page.locator(".tp-panel").boundingBox();
-check("地图与信息板在窄屏下纵向堆叠", panelBox.y >= mapBox.y + mapBox.height - 2,
+check("地图与侧栏在窄屏下纵向堆叠", panelBox.y >= mapBox.y + mapBox.height - 2,
   `map ${Math.round(mapBox.y)}+${Math.round(mapBox.height)} → panel ${Math.round(panelBox.y)}`);
-check("窄屏下信息板仍完整", (await rows()).length === 4);
-await page.screenshot({ path: path.join(shots, "10-mobile.png") });
+check("窄屏下作答区仍然可用", (await answerBox()).height > 100);
+await page.screenshot({ path: path.join(shots, "12-mobile.png") });
 
-// ── 14. 运行期无报错 ─────────────────────────────────────────
-section("14. 运行期无报错");
+// ── 13. 无报错 ───────────────────────────────────────────────
+section("13. 运行期无报错");
 check("没有 console error / pageerror / 资源加载失败", errors.length === 0, errors.slice(0, 4).join(" | "));
 
 await browser.close();

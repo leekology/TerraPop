@@ -56,9 +56,9 @@ window.TERRAPOP.locales.en = {
   "hud.comboBadge": "{n} in a row",
 
   "question.counter": "Question {n}",
-  "question.prompt": "Given the {known}, what is its {asked}?",
+  "question.prompt": "What is its {asked}?",
   "question.askLocation": "Click the map to answer",
-  "question.knownLocation": "Marked on the map",
+  "question.knownLocation": "Circled on the map",
   "question.hintFirst": "Starts with: {v}",
   "question.hintCapitalMarker": "All {term} positions are marked",
 
@@ -67,13 +67,15 @@ window.TERRAPOP.locales.en = {
   "input.smartHint": "Pinyin and initials work; unambiguous input is judged instantly",
   "input.ambiguous": "{n} candidates — pick one or keep typing",
 
-  "board.hidden": "hidden",
+  "prev.title": "Previous",
+  "prev.explainTitle": "How to play",
+  "prev.explainBody": "You get one of the four facts and only have to supply another. Location questions are answered by clicking the map; the rest can be typed or chosen. Typing accepts pinyin and pinyin initials and judges itself as soon as the input is unambiguous. Once you answer, that question's facts and encyclopedia appear in this card while the next question takes the same place below — nothing moves, nothing blocks, and the longer your combo the higher you score.",
+  "prev.none": "Nothing answered yet",
+  "prev.yourAnswer": "You answered",
+  "prev.unknown": "Not answered",
 
   "action.submit": "OK",
   "action.skip": "Skip",
-  "action.next": "Next",
-  "action.seeResult": "See result",
-  "action.detail": "Details",
   "action.restart": "Play again",
   "action.backHome": "Back to start",
   "action.speak": "Read aloud",
@@ -114,13 +116,8 @@ window.TERRAPOP.locales.en = {
   "settings.timer.off": "No limit",
   "settings.timer.global": "60-second rush",
   "settings.timer.perQuestion": "20 seconds per question",
-  "settings.autoDelay": "Reveal dwell time",
-  "settings.delay.fast": "Fast (1s)",
-  "settings.delay.normal": "Normal (1.6s)",
-  "settings.delay.slow": "Slow (2.6s)",
   "settings.helpers": "Helpers",
   "settings.smartInput": "Smart input (pinyin / initials)",
-  "settings.autoAdvance": "Advance automatically",
   "settings.hintFirst": "First-character hint",
   "settings.hintCapital": "Show capital markers",
   "settings.hintGroup": "Hint the macro-region on locate questions",
@@ -129,6 +126,7 @@ window.TERRAPOP.locales.en = {
   "settings.sound": "Sound effects",
   "settings.motion": "Animations",
   "settings.voice.on": "Read questions aloud",
+  "settings.voice.notImplemented": "Answering by voice is still under construction.",
 
   "summary.title": "Round over",
   "summary.score": "Score",
@@ -144,14 +142,11 @@ window.TERRAPOP.locales.en = {
 
   "home.startCta": "Start",
   "home.howto.title": "How to play",
-  "home.howto.body": "You get one fact (full name / abbreviation / capital / location) and only have to supply another. Location questions are answered by clicking the map; the rest can be typed or chosen. Typing accepts pinyin and pinyin initials, and judges itself as soon as the input is unambiguous. Every answer reveals all four facts — and the longer your combo, the higher you score.",
+  "home.howto.body": "You get one fact (full name / abbreviation / capital / location) and only have to supply another. Location questions are answered by clicking the map; the rest can be typed or chosen. Typing accepts pinyin and pinyin initials, and judges itself as soon as the input is unambiguous. Every answer reveals all four facts — nothing moves and nothing blocks, so the longer your combo the higher you score.",
   "home.regionCount": "This round covers {n} province-level regions",
 
   "map.insetSouthChinaSea": "South China Sea Islands",
   "map.insetHongKongMacao": "Hong Kong · Macao",
-
-  "voice.unsupported": "This browser does not support speech synthesis.",
-  "voice.notImplemented": "Answering by voice is still under construction.",
 
   "time.up": "Time's up",
   "misc.close": "Close"

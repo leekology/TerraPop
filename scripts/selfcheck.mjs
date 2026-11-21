@@ -76,6 +76,11 @@ for (const r of country.regions) {
   }
 }
 check("中英名称 / 省会齐全", missingName === 0, `缺失 ${missingName}`);
+const noPinyin = country.regions.filter(r => (r.short || []).some(sh => !sh.pinyin || !sh.char)).map(r => r.id);
+check("每个简称都有带声调的拼音（信息卡片要用来标注读音）", noPinyin.length === 0, noPinyin.join(","));
+const toneless = [];
+country.regions.forEach(r => (r.short || []).forEach(sh => { if (sh.pinyin && !/[āáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜü]/.test(sh.pinyin)) toneless.push(r.id + ":" + sh.pinyin); }));
+check("简称拼音都标了声调", toneless.length === 0, toneless.slice(0, 5).join(","));
 
 // ── 百科 ─────────────────────────────────────────────────────
 section("百科与记忆点");

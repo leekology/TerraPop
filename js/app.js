@@ -97,6 +97,21 @@
     return T.game.displayFor(region, dim, settings.locale);
   }
 
+  /** 简称的带调拼音，如 冀→jì、川/蜀→chuān / shǔ */
+  function shortPinyin(region) {
+    return (region.short || []).map(function (s) { return s.pinyin; }).filter(Boolean).join(" / ");
+  }
+
+  /**
+   * 汉字内容显式标上 lang="zh-Hans"。
+   * 界面语言是英文时 <html lang> 会变成 en，这时候汉字就得靠自己声明语言，
+   * 浏览器才会挑中文字体而不是日文字形。
+   */
+  function markLang(node, text) {
+    if (U.hasHan(text)) node.setAttribute("lang", "zh-Hans");
+    return node;
+  }
+
   /** 把毫秒格式化成「2 分 13 秒」/「13 秒」 */
   function formatDuration(ms) {
     var total = Math.max(0, Math.round((ms || 0) / 1000));
@@ -456,9 +471,8 @@
     // 已知信息
     U.clear(el.knownChip);
     el.knownChip.appendChild(U.el("em", { text: t("dim." + q.known) }));
-    el.knownChip.appendChild(U.el("b", {
-      text: q.known === "location" ? t("question.knownLocation") : boardValue(q.region, q.known)
-    }));
+    var knownText = q.known === "location" ? t("question.knownLocation") : boardValue(q.region, q.known);
+    el.knownChip.appendChild(markLang(U.el("b", { text: knownText }), knownText));
     if (q.known === "capital") el.knownChip.appendChild(U.el("small", { text: T.game.termOf(q.region) }));
 
     // 题面
@@ -522,7 +536,7 @@
       q.choices.forEach(function (label, i) {
         var b = U.el("button", { class: "tp-choice", type: "button" }, [
           U.el("span", { class: "tp-choice-key", text: String(i + 1) }),
-          U.el("span", { class: "tp-choice-text", text: label })
+          markLang(U.el("span", { class: "tp-choice-text", text: label }), label)
         ]);
         b.addEventListener("click", function () { commit({ kind: "choice", value: label }); });
         grid.appendChild(b);
@@ -630,7 +644,8 @@
 
     var head = U.el("div", { class: "tp-prev-head" });
     head.appendChild(U.el("span", { class: "tp-verdict tp-verdict-" + cls, text: t("feedback." + cls) }));
-    head.appendChild(U.el("b", { class: "tp-prev-name", text: localePick(region.fullNames, settings.locale) }));
+    head.appendChild(markLang(U.el("b", { class: "tp-prev-name", text: localePick(region.fullNames, settings.locale) }),
+      localePick(region.fullNames, settings.locale)));
     head.appendChild(U.el("span", {
       class: "tp-prev-your",
       text: t("prev.yourAnswer") + "：" + (result.given || t("prev.unknown"))
@@ -643,7 +658,15 @@
         class: "tp-prev-cell" + (dim === result.question.asked ? " tp-prev-cell-asked" : "")
       });
       cell.appendChild(U.el("em", { text: t("dim." + dim) }));
-      cell.appendChild(U.el("b", { text: boardValue(region, dim) }));
+
+      var value = boardValue(region, dim);
+      cell.appendChild(markLang(U.el("b", { text: value }), value));
+
+      // 简称补上带声调的拼音，方便把字形和读音绑定起来
+      if (dim === "short") {
+        var py = shortPinyin(region);
+        if (py) cell.appendChild(U.el("small", { class: "tp-prev-pinyin", text: py, lang: "zh-Latn" }));
+      }
       if (dim === "capital" && region.capitalTerm !== "none") {
         cell.appendChild(U.el("small", { text: T.game.termOf(region) }));
       }

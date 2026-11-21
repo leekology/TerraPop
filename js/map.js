@@ -402,6 +402,7 @@
     function terrainLabel(x, y, text, cls) {
       var t = U.svgEl("text", { class: "tp-terrain-label " + (cls || ""), x: x.toFixed(1), y: y.toFixed(1) });
       t.textContent = text;
+      if (U.hasHan(text)) t.setAttribute("lang", "zh-Hans");   // 界面切成英文时也要挑中文字体
       gTerrainLabels.appendChild(t);
     }
 
@@ -743,6 +744,8 @@
         t1.textContent = locOf(region.names);
         var t2 = U.svgEl("text", { class: "tp-label-sub", x: pos[0], y: pos[1] + 16 });
         t2.textContent = sub.join(" · ");
+        if (U.hasHan(t1.textContent)) t1.setAttribute("lang", "zh-Hans");
+        if (U.hasHan(t2.textContent)) t2.setAttribute("lang", "zh-Hans");
         g.appendChild(t1);
         g.appendChild(t2);
         gLabels.appendChild(g);

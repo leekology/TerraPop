@@ -26,9 +26,19 @@
   --hud-h:      78px;   /* 头部 + 进度条 */
   --block-h:    312px;  /* 当前题区块固定高度（已知 + 题面 + 提示 + 作答区 + 间距） */
   --prev-h:     232px;  /* 上一题卡片固定高度（内部滚动） */
-  --round: ui-rounded, "SF Pro Rounded", "Hiragino Maru Gothic ProN",
-           "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
-           "Noto Sans SC", system-ui, -apple-system, sans-serif;
+  /* 字体栈要点：
+     1) 拉丁字母 / 数字 / 拼音声调字符必须由「排在中文之前、且覆盖 Latin Extended-B」的字体提供。
+        苹方不覆盖 ǒ ǔ ǎ ě ǖǘǚǜ，如果让它先命中，同一个音节里就会混两种字体。
+     2) 中文只交给中文字体，绝不放日文字体（Hiragino Maru Gothic / Kaku Gothic / Yu Gothic…），
+        否则汉字会按日文字形渲染。
+     3) ui-rounded / SF Pro Rounded 在 Chromium 里不解析（实际落到 Helvetica），
+        留着是为了在 Safari 上拿到圆体；不影响其它浏览器的结果。 */
+  --round: ui-rounded, "SF Pro Rounded",
+           "Helvetica Neue", "Segoe UI Variable Display", "Segoe UI", Helvetica, Arial,
+           "PingFang SC", "Hiragino Sans GB", "Heiti SC",
+           "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC",
+           "WenQuanYi Zen Hei", "Microsoft YaHei",
+           system-ui, -apple-system, sans-serif;
 }
 
 * { box-sizing: border-box; }
@@ -266,6 +276,10 @@ body {
 .tp-prev-cell em { font-style: normal; font-size: 10px; color: var(--ink-soft); }
 .tp-prev-cell b { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tp-prev-cell small { font-size: 10px; color: var(--ink-soft); }
+.tp-prev-pinyin {
+  font-size: 11px !important; color: #7d93a2 !important;
+  letter-spacing: .04em; font-style: italic;
+}
 .tp-prev-cell-asked { border-color: #ffd49b; background: #fffaf3; }
 
 /* 当前题：位置固定，钉在侧栏底部，中间的空隙由 auto margin 吃掉 */

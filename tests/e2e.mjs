@@ -65,6 +65,16 @@ async function pickChip(name, value) {
   await page.waitForTimeout(70);
 }
 const head = () => page.textContent("#qCounter");
+async function platformFonts(selector) {
+  const cdp = await context.newCDPSession(page);
+  await cdp.send("DOM.enable");
+  await cdp.send("CSS.enable");
+  const { root } = await cdp.send("DOM.getDocument", { depth: 0 });
+  const { nodeId } = await cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector });
+  const { fonts } = await cdp.send("CSS.getPlatformFontsForNode", { nodeId });
+  await cdp.detach();
+  return (fonts || []).map(f => f.familyName);
+}
 const prevInfo = () => page.evaluate(() => ({
   isAnswer: document.getElementById("prevCard").classList.contains("tp-prev-answer"),
   title: (document.querySelector("#prevCard .tp-prev-title") || {}).textContent || "",
@@ -196,6 +206,50 @@ check("上一题的信息落到了上方卡片", p1.isAnswer && p1.cells === 4, 
 check("上方卡片写明判对 / 判错", p1.verds.includes("答对") || p1.verds.includes("答错"), p1.verds);
 check("上方卡片含记忆点 / 趣味知识 / 小百科三段", p1.wiki === 3, String(p1.wiki));
 check("上方卡片显示正确答案的全称", p1.name.length > 0, p1.name);
+
+// 简称要带声调拼音
+const shortCell = await page.evaluate(() => {
+  const c = [...document.querySelectorAll("#prevCard .tp-prev-cell")]
+    .find(x => x.querySelector("em") && x.querySelector("em").textContent.includes("简称"));
+  return c ? c.textContent.trim() : "";
+});
+check("信息卡片里的简称带上了带声调的拼音",
+  /[āáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ]/.test(shortCell), shortCell);
+const shortPinyinLang = await page.evaluate(() => {
+  const el = document.querySelector("#prevCard .tp-prev-pinyin");
+  return el ? el.getAttribute("lang") : null;
+});
+check("拼音用 zh-Latn 标了语言", shortPinyinLang === "zh-Latn", String(shortPinyinLang));
+
+// 字体回归：汉字必须是中文字体（不能是日文字形），拼音声调字符不能混字体
+const JP_FONTS = ["Hiragino Maru Gothic ProN", "Hiragino Kaku Gothic ProN", "YuGothic", "Yu Gothic",
+  "Meiryo", "MS Gothic", "Hiragino Sans", "Osaka", "Noto Sans JP"];
+const isJapanese = f => !/GB/.test(f) && JP_FONTS.some(j => f.startsWith(j));
+
+async function probeFonts(text, lang) {
+  await page.evaluate(([t, l]) => {
+    let d = document.getElementById("tpFontProbe");
+    if (!d) {
+      d = document.createElement("div");
+      d.id = "tpFontProbe";
+      d.style.cssText = "position:fixed;left:8px;top:8px;z-index:99999;font-size:24px;white-space:nowrap;font-family:var(--round)";
+      document.body.appendChild(d);
+    }
+    d.setAttribute("lang", l);
+    d.textContent = t;
+  }, [text, lang]);
+  await page.waitForTimeout(60);
+  return platformFonts("#tpFontProbe");
+}
+
+const hanFonts = await probeFonts("冀蜀陕高原盆地长江", "zh-Hans");
+check("汉字只用一种字体渲染", hanFonts.length === 1, hanFonts.join(" + "));
+check("汉字没有落到日文字体上", !hanFonts.some(isJapanese), hanFonts.join(" + "));
+const toneFonts = await probeFonts("lǒng shǔ shǎn zàng měng ǖǘǚǜ lǎ bǐ", "zh-Latn");
+check("拼音声调字符（Latin Extended-B）只用一种字体，一个音节不混字体",
+  toneFonts.length === 1, toneFonts.join(" + "));
+console.log(`    · 汉字字体：${hanFonts.join(",")}；拼音/拉丁字体：${toneFonts.join(",")}`);
+await page.evaluate(() => { const d = document.getElementById("tpFontProbe"); if (d) d.remove(); });
 await page.screenshot({ path: path.join(shots, "03-after-answer.png") });
 
 // ── 4. 位置固定 ──────────────────────────────────────────────

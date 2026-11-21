@@ -41,14 +41,18 @@
     return out;
   }
 
+  /** 只去声调，保留空格与大小写（用于按词切分拉丁文） */
+  function stripDiacritics(str) {
+    return String(str == null ? "" : str)
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/ü/g, "u");
+  }
+
   function stripDiacriticsLower(str) {
     // 只有含拉丁字母时才做，避免对纯中文做无谓的 normalize 分解
     if (!/[a-zA-Z\u00c0-\u024f]/.test(str)) return str;
-    return str
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f\u0301\u0304\u030c]/g, "")
-      .replace(/ü/g, "u")
-      .toLowerCase();
+    return stripDiacritics(str).toLowerCase();
   }
 
   function normalize(value) {
@@ -79,6 +83,40 @@
       }
     }
     return out;
+  }
+
+  // ── 汉字 → 拼音（本项目自带的查表，见 data/han-initials.js）─────────
+
+  /** 逐字拼成无声调拼音，字之间用空格分隔。非汉字直接小写保留。 */
+  function pinyinTokens(str) {
+    var map = T.hanPinyin || {};
+    var out = [];
+    var latin = "";
+    function flush() { if (latin) { out.push(latin); latin = ""; } }
+    for (var i = 0; i < str.length; i++) {
+      var ch = str.charAt(i);
+      if (map[ch]) { flush(); out.push(map[ch]); }
+      else if (/[A-Za-z0-9]/.test(ch)) latin += ch.toLowerCase();
+      else if (/[\u00c0-\u024f]/.test(ch)) latin += ch; // 带调字母，后面统一去调
+      else flush();
+    }
+    flush();
+    return out;
+  }
+
+  /** 连写的拼音，如「石家庄」→ "shijiazhuang" */
+  function pinyinFlat(str) {
+    return pinyinTokens(str).join("").replace(/[^a-z0-9]/g, "");
+  }
+
+  /**
+   * 拼音首字母串，如「石家庄」→ "sjz"、「呼和浩特」→ "hhht"。
+   * 拉丁词按单词取首字母：「Hong Kong」→ "hk"。
+   */
+  function initialsOf(str) {
+    var toks = pinyinTokens(str);
+    if (!toks.length) return "";
+    return toks.map(function (t) { return t.charAt(0); }).join("");
   }
 
   /** 一个字符串的全部可接受写法（原文 + 去后缀）。 */
@@ -209,6 +247,12 @@
     normalize: normalize,
     stripSuffix: stripSuffix,
     answerForms: answerForms,
+    pinyinTokens: pinyinTokens,
+    pinyinFlat: pinyinFlat,
+    initialsOf: initialsOf,
+    stripDiacritics: stripDiacritics,
+    hasHan: function (s) { return /[\u3400-\u9fff]/.test(String(s || "")); },
+    isHanString: function (s) { return /[\u3400-\u9fff]/.test(String(s || "")) && !/[A-Za-z0-9]/.test(String(s || "")); },
     el: el, svgEl: svgEl, clear: clear, $: $, $$: $$,
     shuffle: shuffle, sample: sample, pick: pick,
     format: format, firstChar: firstChar, escapeHtml: escapeHtml,

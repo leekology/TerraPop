@@ -1,13 +1,13 @@
-// TerraPop · 竞猜引擎
+// TerraPop · 竞猜引擎（一问一答版）
 // ---------------------------------------------------------------
-// 通用模型：已知 1 个维度（known），猜其余维度的子集（ask）。
-//   full     全称
-//   short    简称（可能多个）
-//   capital  省会 / 首府
-//   location 位置（只能靠点击地图作答）
+// 模型：每道题给出 1 个已知维度，只问 1 个维度。
+//   维度 full / short / capital / location
+//   已知 × 作答 → 4×3 = 12 种正交组合（同一维度不能自己问自己）
+//   作答方式 style：text | choice3 | choice4 | choice5 | locate
+//   当作答维度是 location 时 style 固定为 locate（点击地图）
 //
-// 出题 / 判定 / 计分都只依赖 TERRAPOP.countries.<id>.regions 的统一字段，
-// 因此新增国家不需要改动本文件（见 docs/i18n.md）。
+// 因此「玩法矩阵」是完全正交的：任何 known × asked × style 都能配置出来。
+// 所有函数只依赖 TERRAPOP.countries.<id>.regions 的统一字段，新增国家无需改本文件。
 // ---------------------------------------------------------------
 
 (function (global) {
@@ -15,100 +15,126 @@
   var T = (global.TERRAPOP = global.TERRAPOP || {});
   var U = T.util;
 
-  var MODES = {
-    "location-to-name":  { known: "location", ask: ["full", "short", "capital"] },
-    "name-to-location":  { known: "full",     ask: ["location", "short"] },
-    "capital-to-location": { known: "capital", ask: ["location", "short"] },
-    "short-to-location": { known: "short",    ask: ["location", "capital"] },
-    "all":               { known: null,       ask: ["full", "short", "capital", "location"] }
-  };
+  var DIMS = ["full", "short", "capital", "location"];
+  var KNOWN_OPTIONS = ["full", "short", "capital", "location", "random"];
+  var ASKED_OPTIONS = ["full", "short", "capital", "location", "random"];
+  var STYLES = ["text", "choice3", "choice4", "choice5", "locate"];
 
-  var MODE_ORDER = ["location-to-name", "name-to-location", "capital-to-location", "short-to-location", "all"];
+  var CHOICE_COUNT = { choice3: 3, choice4: 4, choice5: 5 };
+  // 选项越多越好蒙，分数权重越低
+  var STYLE_WEIGHT = { text: 1, locate: 1, choice3: 0.7, choice4: 0.8, choice5: 0.9 };
 
-  function modeConfig(mode) { return MODES[mode] || MODES["location-to-name"]; }
+  var BASE_POINTS = 100;
 
-  /** 该条数据是否支持这个维度 */
+  // ── 维度可用性 ───────────────────────────────────────────────
+
   function supports(region, dim) {
+    if (!dim) return false;
     if (dim === "capital") return region.capitalTerm !== "none" && !!region.capital;
     if (dim === "short") return !!(region.short && region.short.length);
-    return true;
+    return true; // full / location 恒可用
   }
 
-  /** 该地区能否作为这个模式的题目（known 维度必须存在） */
-  function eligible(region, mode) {
-    var cfg = modeConfig(mode);
-    if (cfg.known && !supports(region, cfg.known)) return false;
-    return askOf(region, mode).length > 0;
-  }
-
-  /** 实际要作答的维度（按数据可用性过滤） */
-  function askOf(region, mode) {
-    var cfg = modeConfig(mode);
-    return cfg.ask.filter(function (d) { return supports(region, d); });
-  }
-
-  function knownOf(region, mode) {
-    var cfg = modeConfig(mode);
-    return cfg.known && supports(region, cfg.known) ? cfg.known : null;
+  function availableDims(region) {
+    return DIMS.filter(function (d) { return supports(region, d); });
   }
 
   // ── 可接受答案 ───────────────────────────────────────────────
 
-  function uniq(arr) {
-    var seen = {}, out = [];
-    arr.forEach(function (v) { if (v && !seen[v]) { seen[v] = 1; out.push(v); } });
-    return out;
-  }
-
-  function flattenLocaleMap(obj, mapper) {
+  /**
+   * 把一个"原始写法"展开成全部可接受的可输入形式：
+   *   归一化原文、去掉行政后缀的版本、无声调拼音、拼音首字母。
+   * 例：石家庄 → ["石家庄", "shijiazhuang", "sjz"]
+   *     河北省 → ["河北省", "河北", "hebeisheng", "hbs", "hebei", "hb"]
+   *
+   * opts.pinyin === false 时只保留字面写法：用于"别称"（羊城、盛京、石头城…），
+   * 它们的拼音首字母太短，会去抢别的答案，所以只认完全输入的字面形式。
+   */
+  function expand(raw, opts) {
+    if (raw === null || raw === undefined) return [];
+    var s = String(raw);
+    if (!s) return [];
+    var withPinyin = !(opts && opts.pinyin === false);
     var out = [];
-    if (!obj) return out;
-    Object.keys(obj).forEach(function (l) {
-      var v = obj[l];
-      if (v === null || v === undefined) return;
-      (Array.isArray(v) ? v : [v]).forEach(function (x) {
-        if (typeof x !== "string" || !x) return;
-        out = out.concat(mapper ? mapper(x) : U.answerForms(x));
+    function add(v) { if (v && out.indexOf(v) === -1) out.push(v); }
+
+    U.answerForms(s).forEach(add);
+
+    if (!withPinyin) return out;
+
+    if (U.hasHan(s)) {
+      var norm = U.normalize(s);
+      var stripped = U.stripSuffix(norm);
+      [s, stripped].forEach(function (form) {
+        if (!form || !U.hasHan(form)) return;
+        add(U.pinyinFlat(form));
+        var ini = U.initialsOf(form);
+        if (ini && ini !== U.pinyinFlat(form)) add(ini);
       });
-    });
+    } else {
+      // 纯拉丁：多词时补一个单词首字母串（Hebei Province → hp、Hong Kong → hk）
+      var words = U.stripDiacritics(s).toLowerCase().match(/[a-z0-9']+/g) || [];
+      if (words.length > 1) {
+        var ini2 = words.map(function (w) { return w.charAt(0); }).join("");
+        if (ini2.length >= 2 && ini2.length <= 8) add(ini2);
+      }
+    }
     return out;
   }
 
-  function acceptedFull(region) {
-    return uniq(
-      flattenLocaleMap(region.fullNames)
-        .concat(flattenLocaleMap(region.names))
-        .concat(flattenLocaleMap(region.aliases))
-    );
+  var KEY_CACHE = {};
+  var KEY_LRU = [];
+
+  /**
+   * 构造某个维度上"用户可以输入什么"。
+   *   primary：正式名称 / 简称 / 省会 及其拼音、首字母 → 参与前缀匹配（智能输入）
+   *   extra  ：别称（羊城、日光城、陇右…）→ 只在完全输入时才认，免得前缀匹配太吵
+   */
+  function buildKeySets(region, dim, locale) {
+    var primary = [], extra = [];
+    function addTo(bucket, raw, opts) {
+      if (raw === null || raw === undefined) return;
+      expand(raw, opts).forEach(function (k) { if (bucket.indexOf(k) === -1) bucket.push(k); });
+    }
+    function addAll(bucket, v, opts) {
+      if (v === null || v === undefined) return;
+      (Array.isArray(v) ? v : [v]).forEach(function (x) { addTo(bucket, x, opts); });
+    }
+    function addLocaleMap(bucket, obj, opts) {
+      if (!obj) return;
+      Object.keys(obj).forEach(function (l) { addAll(bucket, obj[l], opts); });
+    }
+
+    if (dim === "full") {
+      addLocaleMap(primary, region.fullNames);
+      addLocaleMap(primary, region.names);
+      addLocaleMap(extra, region.aliases, { pinyin: false });
+    } else if (dim === "short") {
+      (region.short || []).forEach(function (s) { addTo(primary, s.char); addTo(primary, s.pinyin); });
+    } else if (dim === "capital") {
+      addLocaleMap(primary, region.capital);
+      addTo(primary, region.capitalPinyin);
+      addLocaleMap(extra, region.capitalAliases, { pinyin: false });
+    }
+
+    var all = primary.slice();
+    extra.forEach(function (k) { if (all.indexOf(k) === -1) all.push(k); });
+    return { primary: primary, extra: extra, all: all };
   }
 
-  function acceptedShort(region) {
-    var out = [];
-    (region.short || []).forEach(function (s) {
-      out = out.concat(U.answerForms(s.char));
-      if (s.pinyin) out = out.concat(U.answerForms(s.pinyin));
-    });
-    // 「内蒙古」这类多字简称，也接受其不含后缀的写法
-    return uniq(out);
+  function keySetsFor(region, dim, locale) {
+    var ck = region.id + "|" + dim + "|" + locale;
+    if (KEY_CACHE[ck]) return KEY_CACHE[ck];
+    var sets = buildKeySets(region, dim, locale);
+    KEY_CACHE[ck] = sets;
+    KEY_LRU.push(ck);
+    if (KEY_LRU.length > 800) delete KEY_CACHE[KEY_LRU.shift()];
+    return sets;
   }
 
-  function acceptedCapital(region) {
-    if (region.capitalTerm === "none" || !region.capital) return [];
-    return uniq(
-      flattenLocaleMap(region.capital)
-        .concat(flattenLocaleMap(region.capitalAliases))
-        .concat(region.capitalPinyin ? U.answerForms(region.capitalPinyin) : [])
-    );
-  }
+  function keysFor(region, dim, locale) { return keySetsFor(region, dim, locale).all; }
 
-  function acceptedFor(region, dim) {
-    if (dim === "full") return acceptedFull(region);
-    if (dim === "short") return acceptedShort(region);
-    if (dim === "capital") return acceptedCapital(region);
-    return [];
-  }
-
-  // ── 展示用文本 ───────────────────────────────────────────────
+  // ── 展示文本 ─────────────────────────────────────────────────
 
   function localePick(obj, locale, fallback) {
     if (!obj) return "";
@@ -129,79 +155,174 @@
     }
   }
 
+  /** 简称在英文界面下补上拼音，便于对照记忆 */
+  function shortDisplay(region, locale) {
+    var chars = (region.short || []).map(function (s) { return s.char; });
+    if (!chars.length) return "";
+    var py = (region.short || []).map(function (s) { return s.pinyin; }).filter(Boolean);
+    if (locale !== "zh-Hans" && py.length) return chars.join(" / ") + " (" + py.join(" / ") + ")";
+    return chars.join(" / ");
+  }
+
   function termOf(region) {
     if (region.capitalTerm === "seat") return T.i18n.t("term.seat");
     if (region.capitalTerm === "none") return T.i18n.t("term.none");
     return T.i18n.t("term.capital");
   }
 
-  // ── 判定 ─────────────────────────────────────────────────────
+  // ── 智能输入匹配 ─────────────────────────────────────────────
 
-  function judgeText(region, dim, value) {
-    // 两侧都做"去行政后缀"折叠，所以「石家庄」「石家庄市」都能命中
-    var forms = U.answerForms(value);
-    if (!forms.length) return { status: "skipped", ratio: 0 };
-    var accepted = acceptedFor(region, dim);
-    var ok = forms.some(function (f) { return accepted.indexOf(f) !== -1; });
-    return { status: ok ? "correct" : "wrong", ratio: ok ? 1 : 0 };
+  /**
+   * 按用户已输入的内容，在所有候选地区里找可能答案。
+   * 返回 { kind, candidates }：
+   *   empty  尚未输入
+   *   exact  输入本身就是某个（些）地区的完整答案
+   *   unique 只有唯一地区可能 → 可以直接判定
+   *   multi  多个地区都可能 → 给出候选列表
+   *   none   无匹配
+   */
+  function matchInput(pool, dim, locale, input) {
+    var q = U.normalize(input);
+    if (!q) return { kind: "empty", candidates: [], query: "" };
+    var exact = [], prefix = [];
+    for (var i = 0; i < pool.length; i++) {
+      var r = pool[i];
+      var sets = keySetsFor(r, dim, locale);
+      if (!sets.all.length) continue;
+      if (sets.all.indexOf(q) !== -1) { exact.push(r.id); continue; }
+      // 前缀匹配只看正式名称与拼音，别称只在完全输入时才认
+      for (var j = 0; j < sets.primary.length; j++) {
+        if (sets.primary[j].indexOf(q) === 0) { prefix.push(r.id); break; }
+      }
+    }
+    if (exact.length === 1) return { kind: "exact", candidates: exact, query: q, unique: true };
+    if (exact.length > 1) return { kind: "multi", candidates: exact, query: q, unique: false, ambiguous: true };
+    if (prefix.length === 1) return { kind: "unique", candidates: prefix, query: q, unique: true };
+    if (prefix.length > 1) return { kind: "multi", candidates: prefix, query: q, unique: false };
+    return { kind: "none", candidates: [], query: q, unique: false };
   }
 
-  function judgeLocation(region, payload, opts) {
+  /**
+   * 判定文本作答 —— 与"智能输入"的匹配规则保持一致：
+   *   完全匹配任何可接受写法（含别称）→ 对
+   *   是某个"正式写法"的前缀 → 对（所以打一个字母、只要无歧义就能直接判对）
+   *   别称只认完全输入
+   */
+  function judgeText(target, dim, locale, input) {
+    var q = U.normalize(input);
+    if (!q) return { status: "skipped", ratio: 0, matched: false };
+    var sets = keySetsFor(target, dim, locale);
+    if (sets.all.indexOf(q) !== -1) return { status: "correct", ratio: 1, matched: true };
+    for (var i = 0; i < sets.primary.length; i++) {
+      if (sets.primary[i].indexOf(q) === 0) return { status: "correct", ratio: 1, matched: true };
+    }
+    return { status: "wrong", ratio: 0, matched: false };
+  }
+
+  function judgeLocation(target, payload, opts) {
     var o = opts || {};
     if (!payload || !payload.regionId) return { status: "skipped", ratio: 0 };
-    if (payload.regionId === region.id) return { status: "correct", ratio: 1 };
-
+    if (payload.regionId === target.id) return { status: "correct", ratio: 1 };
     if (o.lenient !== false) {
-      var neighbours = (o.adjacency && o.adjacency[region.id]) || [];
+      var neighbours = (o.adjacency && o.adjacency[target.id]) || [];
       if (neighbours.indexOf(payload.regionId) !== -1) return { status: "close", ratio: 0.5 };
-      var centre = o.centers && o.centers[region.id];
+      var centre = o.centers && o.centers[target.id];
       if (centre && payload.point) {
         var d = T.map.distance(centre, payload.point);
-        var radius = (o.radius && o.radius[region.id]) || 26;
-        if (d < radius) return { status: "close", ratio: 0.5 };
+        if (d < ((o.radius && o.radius[target.id]) || 26)) return { status: "close", ratio: 0.5 };
       }
     }
     return { status: "wrong", ratio: 0 };
   }
 
-  // ── 干扰项（选择题）──────────────────────────────────────────
+  // ── 出题 ─────────────────────────────────────────────────────
 
-  function distractorsFor(region, dim, pool, count, rnd) {
-    var target = displayFor(region, dim, "zh-Hans");
-    var sameGroup = [], others = [];
+  function pickFrom(arr, rnd) { return arr[Math.floor((rnd || Math.random)() * arr.length)]; }
+
+  /** 解出这道题实际的「已知 / 作答」维度；不可行时返回 null */
+  function resolvePair(region, knownCfg, askedCfg, rnd) {
+    var dims = availableDims(region);
+    if (dims.length < 2) return null;
+
+    var known = knownCfg === "random" ? pickFrom(dims, rnd) : knownCfg;
+    if (!supports(region, known)) return null;
+
+    var others = dims.filter(function (d) { return d !== known; });
+    var asked = askedCfg === "random" ? pickFrom(others, rnd) : askedCfg;
+    if (!asked || asked === known || !supports(region, asked)) return null;
+
+    return { known: known, asked: asked };
+  }
+
+  function styleFor(asked, styleCfg) {
+    if (asked === "location") return "locate";
+    return CHOICE_COUNT[styleCfg] ? styleCfg : "text";
+  }
+
+  function eligible(region, knownCfg, askedCfg, rnd) {
+    return !!resolvePair(region, knownCfg, askedCfg, rnd || Math.random);
+  }
+
+  // ── 干扰项 ───────────────────────────────────────────────────
+
+  /**
+   * 生成 N-1 个干扰项。
+   * difficulty: easy(优先跨大区，容易排除) / normal / hard(优先同大区，最难)
+   */
+  function distractors(target, dim, pool, count, difficulty, rnd, locale) {
+    var targetLabel = displayFor(target, dim, locale);
+    var same = [], other = [], seen = {};
     pool.forEach(function (r) {
-      if (r.id === region.id) return;
+      if (r.id === target.id) return;
       if (!supports(r, dim)) return;
-      var label = displayFor(r, dim, "zh-Hans");
-      if (!label || label === target) return;
-      (r.group === region.group ? sameGroup : others).push(label);
+      var label = displayFor(r, dim, locale);
+      if (!label || label === targetLabel || seen[label]) return;
+      seen[label] = 1;
+      (r.group === target.group ? same : other).push(label);
     });
-    sameGroup = uniq(sameGroup);
-    others = uniq(others).filter(function (l) { return sameGroup.indexOf(l) === -1; });
-    var pickedChoices = U.sample(sameGroup, count, rnd);
-    if (pickedChoices.length < count) pickedChoices = pickedChoices.concat(U.sample(others, count - pickedChoices.length, rnd));
-    return pickedChoices;
+    var first = difficulty === "easy" ? other : difficulty === "hard" ? same : null;
+    var second = first === same ? other : same;
+    var out;
+    if (first) out = U.sample(first, count - 1, rnd);
+    else out = U.sample(same.concat(other), count - 1, rnd);
+    if (out.length < count - 1) {
+      var rest = (second || []).filter(function (l) { return out.indexOf(l) === -1; });
+      out = out.concat(U.sample(rest, count - 1 - out.length, rnd));
+    }
+    if (out.length < count - 1) {
+      out = out.concat(U.sample(second || [], count - 1 - out.length, rnd));
+    }
+    return out;
+  }
+
+  function difficultyForStyle(style) {
+    if (style === "choice3") return "easy";
+    if (style === "choice5") return "hard";
+    return "normal";
   }
 
   // ── 会话 ─────────────────────────────────────────────────────
 
-  function createSession(config) {
-    var cfg = config || {};
+  function createSession(cfg) {
+    cfg = cfg || {};
     var country = cfg.country;
-    var mode = cfg.mode || "location-to-name";
     var locale = cfg.locale || country.defaultLocale;
+    var rnd = cfg.random || Math.random;
+
     var pool = country.regions.filter(function (r) {
       if (cfg.regionIds && cfg.regionIds.indexOf(r.id) === -1) return false;
-      return eligible(r, mode);
+      return eligible(r, cfg.known, cfg.asked, rnd);
     });
 
     var session = {
       country: country,
-      mode: mode,
-      pool: pool,
       config: cfg,
+      locale: locale,
+      pool: pool,
+      total: 0,
       index: -1,
       current: null,
+      order: [],
       score: 0,
       combo: 0,
       bestCombo: 0,
@@ -211,9 +332,11 @@
       finished: false
     };
 
-    session.order = U.shuffle(pool.map(function (r) { return r.id; }), cfg.random);
-
+    session.order = U.shuffle(pool.map(function (r) { return r.id; }), rnd);
     session.total = session.order.length;
+
+    session.regionById = {};
+    country.regions.forEach(function (r) { session.regionById[r.id] = r; });
 
     session.next = function () {
       session.index += 1;
@@ -222,91 +345,91 @@
         session.current = null;
         return null;
       }
-      var id = session.order[session.index];
-      var region = pool.filter(function (r) { return r.id === id; })[0];
-      var ask = askOf(region, mode);
-      var known = knownOf(region, mode);
+      var region = session.regionById[session.order[session.index]];
+      var pair = resolvePair(region, cfg.known, cfg.asked, rnd);
+      if (!pair) { return session.next(); }
+
+      var style = styleFor(pair.asked, cfg.style);
       var question = {
         index: session.index,
         region: region,
-        mode: mode,
-        known: known,
-        ask: ask,
+        known: pair.known,
+        asked: pair.asked,
+        style: style,
         term: termOf(region),
-        locale: locale,
-        choices: {},
-        hints: {
-          capitalMarker: !!cfg.hintsCapitalMarker,
-          outline: !!cfg.hintsOutline,
-          firstChar: !!cfg.hintsFirstChar
-        },
-        answers: {}
+        choices: null
       };
-      // 选择题干扰项
-      if (cfg.inputMode === "choice") {
-        ask.forEach(function (dim) {
-          if (dim === "location") return;
-          var ds = distractorsFor(region, dim, country.regions, 3, cfg.random);
-          question.choices[dim] = U.shuffle(ds.concat([displayFor(region, dim, "zh-Hans")]), cfg.random);
-        });
+
+      if (CHOICE_COUNT[style]) {
+        var n = CHOICE_COUNT[style];
+        var ds = distractors(region, pair.asked, country.regions, n, difficultyForStyle(style), rnd, locale);
+        question.choices = U.shuffle(ds.concat([displayFor(region, pair.asked, locale)]), rnd);
       }
+
       session.current = question;
       return question;
     };
 
-    session.submit = function (answers) {
+    /**
+     * 提交作答。
+     * @param {{kind:'text'|'choice'|'locate'|'skip', value?:string, regionId?:string, point?:number[]}} answer
+     */
+    session.submit = function (answer) {
       var q = session.current;
       if (!q) return null;
-      q.answers = answers || {};
-      var items = [];
-      var per = q.ask.length ? 100 / q.ask.length : 0;
+      var a = answer || { kind: "skip" };
+      var region = q.region;
 
-      q.ask.forEach(function (dim) {
-        var a = q.answers[dim];
-        var verdict;
-        if (dim === "location") {
-          verdict = judgeLocation(q.region, a, {
+      var verdict;
+      if (q.asked === "location") {
+        verdict = a.kind === "locate"
+          ? judgeLocation(region, { regionId: a.regionId, point: a.point }, {
             lenient: cfg.judge !== "strict",
             adjacency: cfg.adjacency,
             centers: cfg.centers,
             radius: cfg.radius
-          });
-        } else {
-          verdict = judgeText(q.region, dim, a && a.value);
-        }
-        items.push({
-          dim: dim,
-          status: verdict.status,
-          ratio: verdict.ratio,
-          given: dim === "location"
-            ? (a && a.regionId ? (cfg.nameOf ? cfg.nameOf(a.regionId) : a.regionId) : "")
-            : ((a && a.value) || ""),
-          expected: displayFor(q.region, dim, locale),
-          points: Math.round(per * verdict.ratio)
-        });
-      });
+          })
+          : { status: "skipped", ratio: 0 };
+      } else if (a.kind === "skip") {
+        verdict = { status: "skipped", ratio: 0 };
+      } else {
+        verdict = judgeText(region, q.asked, locale, a.value);
+      }
 
-      var gained = items.reduce(function (s, it) { return s + it.points; }, 0);
-      var allCorrect = items.every(function (it) { return it.status === "correct"; });
+      var weight = STYLE_WEIGHT[q.style] === undefined ? 1 : STYLE_WEIGHT[q.style];
+      var base = Math.round(BASE_POINTS * weight * verdict.ratio);
 
-      session.combo = allCorrect ? session.combo + 1 : 0;
+      var correct = verdict.status === "correct";
+      session.combo = correct ? session.combo + 1 : 0;
       session.bestCombo = Math.max(session.bestCombo, session.combo);
-      if (allCorrect) session.correctCount += 1;
+      if (correct) session.correctCount += 1;
       session.answeredCount += 1;
 
-      // 连击加成：第 n 连击 × (1 + min(n-1,5)×0.1)
-      var mult = allCorrect ? 1 + Math.min(session.combo - 1, 5) * 0.1 : 1;
-      var finalGain = Math.round(gained * mult);
-      session.score += finalGain;
+      var mult = correct ? 1 + Math.min(session.combo - 1, 5) * 0.1 : 1;
+      var gained = Math.round(base * mult);
+      session.score += gained;
+
+      var givenDisplay;
+      if (q.asked === "location") {
+        givenDisplay = a.regionId
+          ? displayFor(session.regionById[a.regionId] || { names: { "zh-Hans": a.regionId } }, "location", locale)
+          : "";
+      } else {
+        givenDisplay = a.value || "";
+      }
 
       var result = {
         question: q,
-        region: q.region,
-        items: items,
-        gained: finalGain,
-        baseGained: gained,
+        region: region,
+        status: verdict.status,
+        correct: correct,
+        close: verdict.status === "close",
+        ratio: verdict.ratio,
+        given: givenDisplay,
+        expected: displayFor(region, q.asked, locale),
+        expectedFull: displayFor(region, "full", locale),
+        gained: gained,
         multiplier: mult,
-        allCorrect: allCorrect,
         combo: session.combo,
         score: session.score
       };
@@ -314,28 +437,50 @@
       return result;
     };
 
+    session.accuracy = function () {
+      return session.answeredCount ? session.correctCount / session.answeredCount : 0;
+    };
     session.remaining = function () { return Math.max(0, session.order.length - session.index - 1); };
 
     return session;
   }
 
+  var MATRIX = (function () {
+    var out = [];
+    DIMS.forEach(function (known) {
+      DIMS.forEach(function (asked) {
+        if (known === asked) return;
+        out.push({ known: known, asked: asked });
+      });
+    });
+    return out; // 12 种
+  })();
+
   T.game = {
-    MODES: MODES,
-    MODE_ORDER: MODE_ORDER,
-    modeConfig: modeConfig,
-    askOf: askOf,
-    knownOf: knownOf,
-    eligible: eligible,
+    DIMS: DIMS,
+    KNOWN_OPTIONS: KNOWN_OPTIONS,
+    ASKED_OPTIONS: ASKED_OPTIONS,
+    STYLES: STYLES,
+    CHOICE_COUNT: CHOICE_COUNT,
+    STYLE_WEIGHT: STYLE_WEIGHT,
+    BASE_POINTS: BASE_POINTS,
+    MATRIX: MATRIX,
     supports: supports,
-    acceptedFor: acceptedFor,
-    acceptedFull: acceptedFull,
-    acceptedShort: acceptedShort,
-    acceptedCapital: acceptedCapital,
+    availableDims: availableDims,
+    expand: expand,
+    keysFor: keysFor,
+    keySetsFor: keySetsFor,
     displayFor: displayFor,
+    shortDisplay: shortDisplay,
     termOf: termOf,
+    matchInput: matchInput,
     judgeText: judgeText,
     judgeLocation: judgeLocation,
-    distractorsFor: distractorsFor,
+    resolvePair: resolvePair,
+    styleFor: styleFor,
+    eligible: eligible,
+    distractors: distractors,
+    difficultyForStyle: difficultyForStyle,
     createSession: createSession
   };
 })(window);

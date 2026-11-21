@@ -15,31 +15,33 @@
 ## 目录结构
 
 ```
-index.html                 页面骨架 + 地图容器
+index.html                 页面骨架 + 信息板容器
 LICENSE
 README.md
 css/
-  style.css                羊皮纸主题、布局、动效
+  style.css                卡通清新主题、布局、动效
 js/
-  core.js                  命名空间、工具函数（归一化、距离、存储、随机）
+  core.js                  命名空间、工具（归一化、拼音推导、DOM、存储）
   i18n.js                  语言切换与 t() 查表
   locales/
     zh-Hans.js             界面文案（简体中文）
     en.js                  界面文案（英文）
-  map.js                   地图渲染、缩放平移、命中判定、高亮、省会标记、地形
+  map.js                   地图渲染（卡通风 + 地貌）、缩放平移、命中判定、高亮、揭示动画
   voice.js                 speak() 朗读 + listen() 语音作答 stub
-  game.js                  出题、判定、计分、状态机
-  app.js                   界面装配、屏幕切换、设置面板
+  game.js                  玩法矩阵、出题、智能输入匹配、判定、计分
+  app.js                   界面装配、一问一答流程、自动下一题、设置、百科详情
 data/
-  cn.js                    34 个省级行政区结构化数据（核心 + 别名 + 大区）
+  cn.js                    34 个省级行政区结构化数据
   cn.wiki.js               双语百科 / 记忆点 / 趣味知识点
-  cn.terrain.js            手绘风格江河湖泊折线（经纬度）
-  han-variants.js          简繁与别名归一化映射表
+  cn.terrain.js            大江大河大湖 + 高原盆地平原沙漠山脉（经纬度）
+  han-initials.js          148 个地名常用字的无声调拼音（支撑智能输入）
+  han-variants.js          简繁与异体字折叠表
 maps/
-  cn.js                    生成的省界 path 数据 + 投影参数 + 省会坐标 + 南海插图框
+  cn.js                    生成的省界 path + 投影参数 + 省会坐标 + 南海插图框
 scripts/
   build-map.mjs            地图数据生成脚本（开发期使用，不参与运行时）
   selfcheck.mjs            数据 / 规则自检，node scripts/selfcheck.mjs
+  data/                    构建输入数据（随仓库提交，保证可离线复现）
   README.md
 tests/
   e2e.mjs                  Playwright + Edge headless 端到端验收（需全局 playwright）
@@ -73,7 +75,7 @@ locales/*  ──┘
 {
   id: "cn",
   names: { "zh-Hans": "中国", "en": "China" },
-  viewBox: [0, 0, 1000, 716],
+  viewBox: [0, 0, 1000, 718],
   // 经纬度 → 图面坐标：
   //   x = (lon - lon0) * cosLat * k
   //   y = (lat0 - lat) * k
@@ -84,6 +86,19 @@ locales/*  ──┘
 }
 ```
 
+### 地图图层顺序（`js/map.js`）
+
+```
+陆地底板（含投影）→ 省界填色层 → 白色描边层 → 深色细线层
+→ 地貌层（裁进陆地轮廓：高原/盆地/平原/沙漠/山脉/河流/湖泊）
+→ 地貌文字标注 → 高亮标记层 → 省会标记层 → 揭示标签层 → 插图框/放大框
+```
+
+- 填色层是唯一可点击的图层（带 `data-id`），其余都是 `pointer-events: none`，
+  所以高亮、标注、省会点永远抢不走点击。
+- 地貌统一由一个 `clipPath`（所有省界拼成的陆地轮廓）裁剪，手绘椭圆画大也不会溢到海里。
+- 地貌画在填色层**之上**并压低不透明度，既能看到大区配色，又能看到地形。
+
 ### `TERRAPOP.countries.cn`（`data/cn.js`）
 
 见 `docs/data-schema.md`。
@@ -91,8 +106,20 @@ locales/*  ──┘
 ### `TERRAPOP.wiki.cn`（`data/cn.wiki.js`）
 
 ```js
-{ "CN-HE": { facts: {locale…}, memo: {locale…}, wiki: {locale…} } }
+{ "CN-HE": { memo: {locale…}, facts: {locale…}, wiki: {locale…} } }
 ```
+
+### `TERRAPOP.game`（`js/game.js`）
+
+```js
+MATRIX                 // 12 种「已知 → 要猜」组合
+matchInput(pool, dim, locale, input) -> { kind, candidates, unique }
+judgeText(target, dim, locale, input) -> { status, ratio }
+createSession({ country, known, asked, style, regionIds, judge, adjacency, centers, radius, locale })
+```
+
+`createSession().submit(answer)` 接受统一形状 `{kind:'text'|'choice'|'locate'|'skip', value?, regionId?}`，
+语音作答只要产出同样的对象就能接进来。
 
 ### `TERRAPOP.locales[locale]`（`locales/*.js`）
 
@@ -108,14 +135,18 @@ locales/*  ──┘
 
 ## 验证方式
 
-- **数据与规则自检**：`node scripts/selfcheck.mjs`
+- **数据与规则自检**：`node scripts/selfcheck.mjs`（72 项）
   在没有浏览器的环境下加载全部运行时脚本，校验：34 条行政区数据完整性、中英字段齐全、
-  百科 34 条三字段双语言非空、地图 id 与行政区 id 一一对应、省会坐标齐全、
-  省份标签点落在本省轮廓内、地形折线不越界、邻接表正确（河北的 7 个邻居、港澳与广东相邻）、
-  答案判定（简繁折叠、多简称、后缀与拼音容错、宽松/严格位置判定）、
-  出题不会问不存在的维度、中英文案 key 完全对齐、代码里用到的文案 key 都有翻译。
+  百科三条目双语言非空、拼音表 148 字全覆盖且能推导出 `sjz / hhht / wlmq / nmg …`、
+  地图 id 与行政区 id 一一对应、省份标签点落在本省轮廓内、
+  **地貌落点**（每个高原/盆地/平原/沙漠的中心、每条山脉与河流湖泊的顶点都在中国陆地内）、
+  邻接表正确、**智能输入**（`sj→石家庄`、`hn` 歧义给候选、别称只在完整输入时生效、繁简折叠、前缀判定）、
+  **玩法矩阵正交完备**（12 组合 × 4 作答方式 = 48 种配置都能出题且题型正确、随机模式不会问自己）、
+  计分权重随作答方式难度递增、中英文案 key 完全对齐、代码里用到的文案 key 都有翻译。
 - **浏览器端到端**：`NODE_PATH="$(npm root -g)" node tests/e2e.mjs`
   用 Playwright + 系统 Edge（`channel: 'msedge'`）headless 打开 `file://…/index.html`，
-  走通「首页配置 → 出题 → 用质心点点击地图 → 填空 → 提交 → 揭示双语百科 → 下一题」，
-  覆盖答对 / 答错 / 纯点击 / 英文界面 / 设置面板 / 缩放 / 移动端视口，
-  并断言运行期无任何 console error 与资源加载失败；截图输出到 `.tmp/shots/`。
+  覆盖：首页玩法矩阵配置、一问一答信息板（已知显示 / 要猜给控件 / 其余待揭晓）、
+  **打拼音首字母自动判定与歧义给候选**、回车提交、就地面板揭示（断言无弹窗）、
+  自动进入下一题、纯文字组合与四选一、定位点选、百科详情双语、缩放、
+  英文界面、设置面板、**12 组合 × 3 作答方式 = 36 种配置冒烟**、移动端堆叠，
+  并断言运行期无任何 console error / pageerror / 资源加载失败；截图输出到 `.tmp/shots/`。

@@ -4,21 +4,20 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light">
-<meta name="description" content="TerraPop — 手绘羊皮纸风中国地图，省市简称 / 省会 / 位置竞猜记忆游戏。">
+<meta name="description" content="TerraPop — 卡通中国地图上的省市简称 / 省会 / 位置竞猜记忆游戏，一问一答、连击冲分。">
 <title>TerraPop · 省市简称与省会竞猜</title>
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 
-<div class="tp-backdrop" aria-hidden="true"></div>
-
 <header class="tp-topbar">
   <div class="tp-brand">
     <span class="tp-brand-mark" aria-hidden="true">
       <svg viewBox="0 0 32 32" width="28" height="28">
-        <circle cx="16" cy="16" r="14" class="tp-brand-ring"/>
-        <path d="M6 20c3-4 6-6 10-6s7 2 10 6" class="tp-brand-line"/>
-        <circle cx="16" cy="11" r="3" class="tp-brand-dot"/>
+        <circle cx="16" cy="16" r="14.5" class="tp-brand-sea"/>
+        <path d="M5 19.5c3.2-4.4 6.6-6.6 11-6.6s7.8 2.2 11 6.6" class="tp-brand-land"/>
+        <circle cx="16" cy="10.4" r="2.6" class="tp-brand-dot"/>
+        <path d="M8.5 24.5h15" class="tp-brand-line"/>
       </svg>
     </span>
     <span class="tp-brand-text">
@@ -27,14 +26,15 @@
     </span>
   </div>
 
-  <div class="tp-scores" id="scoreBar" hidden>
-    <span class="tp-chip">
-      <em data-i18n="score.points">得分</em>
-      <b id="scoreValue">0</b>
+  <div class="tp-hud" id="scoreBar" hidden>
+    <span class="tp-stat tp-stat-combo" id="comboChip">
+      <em data-i18n="hud.combo">连击</em><b id="hudCombo">0</b>
     </span>
-    <span class="tp-chip tp-chip-combo" id="comboChip" hidden>
-      <em data-i18n="score.combo">连击</em>
-      <b id="comboValue">0</b>
+    <span class="tp-stat">
+      <em data-i18n="hud.accuracy">正确率</em><b id="hudAcc">—</b>
+    </span>
+    <span class="tp-stat">
+      <em data-i18n="hud.score">得分</em><b id="hudScore">0</b>
     </span>
   </div>
 
@@ -54,7 +54,7 @@
 
 <main class="tp-main">
 
-  <!-- ── 首页 ─────────────────────────────────────────────── -->
+  <!-- ── 首页：玩法矩阵配置 ─────────────────────────────── -->
   <section class="tp-screen" id="screenHome">
     <div class="tp-home">
       <div class="tp-home-lead">
@@ -62,14 +62,29 @@
         <p class="tp-tagline" data-i18n="app.tagline"></p>
       </div>
 
-      <div class="tp-card tp-card-parchment">
-        <h2 class="tp-card-title" data-i18n="home.mode">玩法</h2>
-        <div class="tp-mode-list" id="homeModeList" role="radiogroup"></div>
+      <div class="tp-card">
+        <h2 class="tp-card-title" data-i18n="config.matrix">玩法组合</h2>
+
+        <div class="tp-config-row">
+          <span class="tp-config-key" data-i18n="config.known">已知</span>
+          <div class="tp-chips" id="knownChips" role="radiogroup"></div>
+        </div>
+        <div class="tp-config-row">
+          <span class="tp-config-key" data-i18n="config.asked">要猜</span>
+          <div class="tp-chips" id="askedChips" role="radiogroup"></div>
+        </div>
+        <div class="tp-config-row">
+          <span class="tp-config-key" data-i18n="config.style">作答方式</span>
+          <div class="tp-chips" id="styleChips" role="radiogroup"></div>
+        </div>
+
+        <p class="tp-config-summary" id="configSummary"></p>
+        <p class="tp-config-note" data-i18n="config.note"></p>
       </div>
 
-      <div class="tp-card tp-card-parchment">
+      <div class="tp-card">
         <h2 class="tp-card-title" data-i18n="scope.title">范围</h2>
-        <div class="tp-scope-list" id="homeScopeList"></div>
+        <div class="tp-chips" id="scopeChips"></div>
         <p class="tp-hint-line" id="homeRegionCount"></p>
       </div>
 
@@ -84,43 +99,45 @@
     </div>
   </section>
 
-  <!-- ── 答题 ─────────────────────────────────────────────── -->
+  <!-- ── 答题：一问一答 ─────────────────────────────────── -->
   <section class="tp-screen" id="screenPlay" hidden>
     <div class="tp-play">
 
       <div class="tp-map-pane">
-        <div class="tp-map-host" id="mapHost" aria-live="polite"></div>
+        <div class="tp-map-host" id="mapHost"></div>
+
+        <div class="tp-legend" id="mapLegend" data-i18n-title="legend.title"></div>
+
         <div class="tp-map-controls">
           <button type="button" class="tp-icon-btn" id="btnZoomIn" data-i18n-title="action.zoomIn" title="放大">＋</button>
           <button type="button" class="tp-icon-btn" id="btnZoomOut" data-i18n-title="action.zoomOut" title="缩小">－</button>
           <button type="button" class="tp-icon-btn" id="btnZoomReset" data-i18n-title="action.zoomReset" title="复位">⌖</button>
         </div>
-        <p class="tp-map-tip" data-i18n="map.labelHint"></p>
       </div>
 
       <aside class="tp-panel">
         <div class="tp-panel-head">
           <button type="button" class="tp-icon-btn tp-quit-btn" id="btnQuit" data-i18n-title="action.backHome" title="返回首页">⌂</button>
           <span class="tp-counter" id="qCounter"></span>
-          <span class="tp-progress" id="qProgress"></span>
+          <span class="tp-progress-text" id="qProgress"></span>
           <span class="tp-timer" id="qTimer" hidden></span>
+          <span class="tp-combo-badge" id="comboBadge" hidden></span>
+        </div>
+        <div class="tp-progress-bar"><i id="progressFill"></i></div>
+
+        <div class="tp-ask" id="askCard">
+          <p class="tp-ask-text" id="askText"></p>
         </div>
 
-        <div class="tp-known" id="knownCard"></div>
+        <div class="tp-board" id="infoBoard"></div>
 
-        <div class="tp-question" id="questionArea"></div>
-        <div class="tp-hints" id="hintBar"></div>
-        <div class="tp-answers" id="answerArea"></div>
-
-        <div class="tp-panel-actions">
-          <button type="button" class="tp-btn tp-btn-primary" id="btnSubmit" data-i18n="action.submit">提交</button>
-          <button type="button" class="tp-btn tp-btn-ghost" id="btnSkip" data-i18n="action.skip">跳过</button>
-          <button type="button" class="tp-btn tp-btn-ghost tp-btn-mic" id="btnMic" data-i18n-title="action.mic" title="语音作答">
-            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-              <path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3z"/>
-              <path d="M18 11a6 6 0 0 1-12 0M12 18v3"/>
-            </svg>
-          </button>
+        <div class="tp-reveal" id="revealInline" hidden>
+          <p class="tp-memo" id="revealMemo"></p>
+          <div class="tp-reveal-actions">
+            <button type="button" class="tp-btn tp-btn-ghost" id="btnDetail" data-i18n="action.detail">百科</button>
+            <button type="button" class="tp-btn tp-btn-primary" id="btnNext" data-i18n="action.next">下一题</button>
+          </div>
+          <div class="tp-auto"><i id="autoFill"></i></div>
         </div>
       </aside>
 
@@ -129,7 +146,7 @@
 
   <!-- ── 结算 ─────────────────────────────────────────────── -->
   <section class="tp-screen" id="screenSummary" hidden>
-    <div class="tp-card tp-card-parchment tp-summary">
+    <div class="tp-card tp-summary">
       <h2 class="tp-card-title" data-i18n="summary.title">本局结束</h2>
       <div class="tp-summary-grid" id="summaryBody"></div>
       <div class="tp-panel-actions tp-actions-center">
@@ -141,29 +158,27 @@
 
 </main>
 
-<!-- ── 揭示卡 ─────────────────────────────────────────────── -->
-<div class="tp-overlay" id="revealOverlay" hidden>
-  <div class="tp-modal tp-modal-reveal" role="dialog" aria-modal="true" aria-labelledby="revealTitle">
-    <div class="tp-reveal-head">
-      <span class="tp-verdict" id="revealBadge"></span>
-      <h2 id="revealTitle"></h2>
-      <button type="button" class="tp-icon-btn tp-close" id="btnRevealSpeak" data-i18n-title="action.speak" title="朗读">🔊</button>
+<!-- ── 百科详情（可选，不打断快速模式）─────────────────── -->
+<div class="tp-overlay" id="wikiOverlay" hidden>
+  <div class="tp-modal" role="dialog" aria-modal="true" aria-labelledby="wikiTitle">
+    <div class="tp-modal-head">
+      <span class="tp-verdict" id="wikiBadge"></span>
+      <h2 id="wikiTitle"></h2>
+      <button type="button" class="tp-icon-btn tp-close" id="btnWikiSpeak" data-i18n-title="action.speak" title="朗读">🔊</button>
+      <button type="button" class="tp-icon-btn tp-close" id="btnWikiClose" aria-label="close">✕</button>
     </div>
-    <div class="tp-reveal-body" id="revealBody"></div>
-    <div class="tp-panel-actions tp-actions-center">
-      <button type="button" class="tp-btn tp-btn-primary" id="btnRevealNext" data-i18n="action.next">下一题</button>
-    </div>
+    <div class="tp-modal-body" id="wikiBody"></div>
   </div>
 </div>
 
 <!-- ── 设置 ───────────────────────────────────────────────── -->
 <div class="tp-overlay" id="settingsOverlay" hidden>
   <div class="tp-modal tp-modal-settings" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
-    <div class="tp-reveal-head">
+    <div class="tp-modal-head">
       <h2 id="settingsTitle" data-i18n="settings.title">设置</h2>
       <button type="button" class="tp-icon-btn tp-close" id="btnSettingsClose" aria-label="close">✕</button>
     </div>
-    <div class="tp-reveal-body" id="settingsBody"></div>
+    <div class="tp-modal-body" id="settingsBody"></div>
   </div>
 </div>
 
@@ -173,6 +188,7 @@
      按依赖顺序加载；全部为传统脚本，file:// 直接可用。
      ───────────────────────────────────────────────────────── -->
 <script src="data/han-variants.js"></script>
+<script src="data/han-initials.js"></script>
 <script src="js/core.js"></script>
 <script src="locales/zh-Hans.js"></script>
 <script src="locales/en.js"></script>

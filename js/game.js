@@ -145,7 +145,7 @@
     var fb = "zh-Hans";
     switch (dim) {
       case "full": return localePick(region.fullNames, locale, fb);
-      case "short": return (region.short || []).map(function (s) { return s.char; }).join(" / ");
+      case "short": return shortText(region);
       case "capital":
         return region.capitalTerm === "none"
           ? T.i18n.t("term.none")
@@ -155,13 +155,29 @@
     }
   }
 
-  /** 简称在英文界面下补上拼音，便于对照记忆 */
-  function shortDisplay(region, locale) {
-    var chars = (region.short || []).map(function (s) { return s.char; });
-    if (!chars.length) return "";
-    var py = (region.short || []).map(function (s) { return s.pinyin; }).filter(Boolean);
-    if (locale !== "zh-Hans" && py.length) return chars.join(" / ") + " (" + py.join(" / ") + ")";
-    return chars.join(" / ");
+  /** 简称的规范显示：只用汉字，多个之间用 " / " 分隔。
+   *  注音属于「讲解」，不进答案面——否则用户会把「津 (jīn)」整个抄进来。 */
+  function shortText(region) {
+    return (region.short || []).map(function (s) { return s.char; }).join(" / ");
+  }
+
+  /**
+   * 用户输入的等价形态，按「优先级」排列：
+   *   有汉字时先只留汉字（「津 (jīn)」「津jīn」都当成「津」来判，最不容易误判）
+   *   然后是归一化原文
+   *   最后是只留拉丁（「津 (jīn)」的 "jin"）
+   * 界面上显示什么，用户就可能照着抄什么，那就必须能判对。
+   */
+  function queryVariants(input) {
+    var q = U.normalize(input);
+    if (!q) return [];
+    var han = q.replace(/[^\u3400-\u9fff]/g, "");
+    var lat = q.replace(/[\u3400-\u9fff]/g, "");
+    var out = [];
+    if (han && han !== q) out.push(han);
+    out.push(q);
+    if (lat && lat !== q && lat !== han && out.indexOf(lat) === -1) out.push(lat);
+    return out;
   }
 
   function termOf(region) {
@@ -184,37 +200,69 @@
   function matchInput(pool, dim, locale, input) {
     var q = U.normalize(input);
     if (!q) return { kind: "empty", candidates: [], query: "" };
-    var exact = [], prefix = [];
-    for (var i = 0; i < pool.length; i++) {
-      var r = pool[i];
-      var sets = keySetsFor(r, dim, locale);
-      if (!sets.all.length) continue;
-      if (sets.all.indexOf(q) !== -1) { exact.push(r.id); continue; }
-      // 前缀匹配只看正式名称与拼音，别称只在完全输入时才认
-      for (var j = 0; j < sets.primary.length; j++) {
-        if (sets.primary[j].indexOf(q) === 0) { prefix.push(r.id); break; }
+    var variants = queryVariants(input);
+
+    // 按优先级依次尝试「完全匹配」，用第一个能命中的形态。
+    // 这样「津 (jīn)」会先按汉字「津」判成天津，而不是按 "jin" 同时命中 津/晋。
+    for (var vi = 0; vi < variants.length; vi++) {
+      var vq = variants[vi];
+      var exact = [];
+      for (var i = 0; i < pool.length; i++) {
+        var sets = keySetsFor(pool[i], dim, locale);
+        if (sets.all.length && sets.all.indexOf(vq) !== -1) exact.push(pool[i].id);
+      }
+      if (exact.length === 1) return { kind: "exact", candidates: exact, query: q, unique: true };
+      if (exact.length > 1) return { kind: "multi", candidates: exact, query: q, unique: false, ambiguous: true };
+    }
+
+    // 前缀匹配只看正式名称与拼音，别称只在完全输入时才认
+    var prefix = [];
+    for (var k = 0; k < pool.length; k++) {
+      var s = keySetsFor(pool[k], dim, locale);
+      for (var j = 0; j < s.primary.length; j++) {
+        if (s.primary[j].indexOf(q) === 0) { prefix.push(pool[k].id); break; }
       }
     }
-    if (exact.length === 1) return { kind: "exact", candidates: exact, query: q, unique: true };
-    if (exact.length > 1) return { kind: "multi", candidates: exact, query: q, unique: false, ambiguous: true };
     if (prefix.length === 1) return { kind: "unique", candidates: prefix, query: q, unique: true };
     if (prefix.length > 1) return { kind: "multi", candidates: prefix, query: q, unique: false };
     return { kind: "none", candidates: [], query: q, unique: false };
   }
 
   /**
-   * 判定文本作答 —— 与"智能输入"的匹配规则保持一致：
-   *   完全匹配任何可接受写法（含别称）→ 对
-   *   是某个"正式写法"的前缀 → 对（所以打一个字母、只要无歧义就能直接判对）
-   *   别称只认完全输入
+   * 判定文本作答 —— 与「智能输入」的匹配规则保持一致：
+   *   1. 完全匹配任一可接受写法（含别称、含把注音一起抄进来的写法）→ 对
+   *   2. 多个简称一起写（贵 / 黔、川、蜀）只要每一段都对 → 对
+   *   3. 是某个「正式写法」的前缀 → 对（所以打一个字母、只要无歧义就能直接判对）
+   *   别称不参与前缀匹配。
    */
   function judgeText(target, dim, locale, input) {
-    var q = U.normalize(input);
+    var raw = String(input == null ? "" : input);
+    var q = U.normalize(raw);
     if (!q) return { status: "skipped", ratio: 0, matched: false };
+
     var sets = keySetsFor(target, dim, locale);
-    if (sets.all.indexOf(q) !== -1) return { status: "correct", ratio: 1, matched: true };
-    for (var i = 0; i < sets.primary.length; i++) {
-      if (sets.primary[i].indexOf(q) === 0) return { status: "correct", ratio: 1, matched: true };
+    var accepted = sets.all;
+
+    // 1) 完全匹配
+    var variants = queryVariants(raw);
+    for (var i = 0; i < variants.length; i++) {
+      if (accepted.indexOf(variants[i]) !== -1) return { status: "correct", ratio: 1, matched: true };
+    }
+
+    // 2) 多个简称一起写
+    var parts = raw.split(/[\/／、,;|]+/).map(function (s) { return s.trim(); }).filter(Boolean);
+    if (parts.length > 1) {
+      var allOk = parts.every(function (p) {
+        var vs = queryVariants(p);
+        for (var k = 0; k < vs.length; k++) if (accepted.indexOf(vs[k]) !== -1) return true;
+        return false;
+      });
+      if (allOk) return { status: "correct", ratio: 1, matched: true };
+    }
+
+    // 3) 前缀
+    for (var j = 0; j < sets.primary.length; j++) {
+      if (sets.primary[j].indexOf(q) === 0) return { status: "correct", ratio: 1, matched: true };
     }
     return { status: "wrong", ratio: 0, matched: false };
   }
@@ -559,7 +607,8 @@
     keysFor: keysFor,
     keySetsFor: keySetsFor,
     displayFor: displayFor,
-    shortDisplay: shortDisplay,
+    shortText: shortText,
+    queryVariants: queryVariants,
     termOf: termOf,
     matchInput: matchInput,
     judgeText: judgeText,

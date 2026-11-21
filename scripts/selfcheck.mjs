@@ -218,6 +218,36 @@ check("石家庄：shijiazhuang 也是精确匹配", match("shijiazhuang", "capi
 check("石家庄：汉字「石家庄」是精确匹配", match("石家庄", "capital").kind === "exact");
 check("别称只在完全输入时才算：石头城 → 南京", match("石头城", "capital").candidates.join() === "CN-JS");
 
+// ── 简称：多语言 / 多简称 / 带注音的输入 ─────────────────────
+section("简称显示与判定（英文界面最容易踩坑）");
+const tj = byId["CN-TJ"], sc = byId["CN-SC"], gz = byId["CN-GZ"], sh = byId["CN-SH"];
+check("英文界面下简称只显示汉字，不掺拼音",
+  T.game.displayFor(tj, "short", "en") === "津" && T.game.displayFor(sc, "short", "en") === "川 / 蜀",
+  T.game.displayFor(sc, "short", "en"));
+check("简称显示里不含括号（不会诱发「津 (jīn)」这种输入）",
+  ids.every(id => !/[()（）]/.test(T.game.displayFor(byId[id], "short", "en"))));
+const tjForms = ["津", "津 (jīn)", "jīn", "jin", "j"];
+check("天津简称：汉字 / 带注音 / 带调拼音 / 无调拼音 / 首字母 都算对",
+  tjForms.every(v => T.game.judgeText(tj, "short", "en", v).status === "correct"),
+  tjForms.filter(v => T.game.judgeText(tj, "short", "en", v).status !== "correct").join(","));
+const multiForms = ["川 / 蜀", "川 / 蜀 (chuān / shǔ)", "贵/黔", "沪 (hù) / 申 (shēn)"];
+check("多简称：把整串显示原样抄进来也算对",
+  T.game.judgeText(sc, "short", "en", "川 / 蜀").status === "correct" &&
+  T.game.judgeText(sc, "short", "en", "川 / 蜀 (chuān / shǔ)").status === "correct" &&
+  T.game.judgeText(gz, "short", "en", "贵/黔").status === "correct" &&
+  T.game.judgeText(sh, "short", "en", "沪 (hù) / 申 (shēn)").status === "correct",
+  multiForms.join(" | "));
+check("多简称：写其中任意一个也对", ["川", "蜀", "chuān", "shǔ"].every(v => T.game.judgeText(sc, "short", "en", v).status === "correct"));
+check("简称不能当全称用", T.game.judgeText(tj, "full", "en", "津").status === "wrong");
+check("全称答成别省算错", T.game.judgeText(tj, "full", "en", "北京").status === "wrong");
+check("界面显示的简称本身就是可接受答案",
+  ids.every(id => T.game.judgeText(byId[id], "short", "en", T.game.displayFor(byId[id], "short", "en")).status === "correct"),
+  ids.filter(id => T.game.judgeText(byId[id], "short", "en", T.game.displayFor(byId[id], "short", "en")).status !== "correct").join(","));
+check("智能输入也容忍带注音的写法（津 (jīn) 精确命中天津）", (() => {
+  const m = T.game.matchInput(country.regions, "short", "en", "津 (jīn)");
+  return m.kind === "exact" && m.candidates.length === 1 && m.candidates[0] === "CN-TJ";
+})());
+
 // ── 地貌标注不能泄露省份 ─────────────────────────────────────
 section("地图标注不泄露省份");
 const forbidden = T.map.buildForbiddenWords(country, "zh-Hans");

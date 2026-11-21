@@ -584,3 +584,6 @@ body {
     transition-duration: .001ms !important;
   }
 }
+
+/* 放大框里的高亮层：不吃点击，描边用 non-scaling-stroke 保持细 */
+.tp-mag-marks, .tp-mag-marks * { pointer-events: none; }

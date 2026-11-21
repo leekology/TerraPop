@@ -107,7 +107,7 @@
   }
 
   function boardValue(region, dim) {
-    if (dim === "short") return T.game.shortDisplay(region, settings.locale);
+    if (dim === "short") return T.game.shortText(region);
     return T.game.displayFor(region, dim, settings.locale);
   }
 

@@ -500,6 +500,38 @@ check("会泄露的山河名也没被标出来（黑龙江/雅鲁藏布江/青�
   !mapStats.labels.some(l => ["黑龙江", "雅鲁藏布江", "青海湖", "滇池", "秦岭"].includes(l)));
 await page.screenshot({ path: path.join(shots, "07-map-spotlight.png") });
 
+// ── 7b. 港澳高亮时放大框也一起高亮 ───────────────────────────
+section("7b. 港澳高亮时放大框一起高亮");
+await leaveGame();
+await pickChip("knownChips", "location");
+await pickChip("askedChips", "full");
+await pickChip("styleChips", "text");
+await setScope(ALL_GROUPS, ["sar"]);            // 只要特别行政区：香港 / 澳门
+check("范围缩到港澳后只剩 2 个", /2/.test(await page.textContent("#homeRegionCount")),
+  await page.textContent("#homeRegionCount"));
+await page.click("#btnStart");
+await page.waitForTimeout(400);
+check("港澳放大框存在", (await page.locator("#mapHost .tp-magnifier").count()) === 1);
+check("放大框里也出现高亮（主图上看不见，必须在小图上标出来）",
+  (await page.locator("#mapHost .tp-mag-marks .tp-mark").count()) === 1);
+check("放大框高亮用 non-scaling-stroke，描边不会被放大成粗块", await page.evaluate(() => {
+  const p = document.querySelector("#mapHost .tp-mag-marks .tp-mark");
+  return !!p && p.getAttribute("vector-effect") === "non-scaling-stroke";
+}));
+await page.screenshot({ path: path.join(shots, "07b-magnifier.png") });
+
+const hkId = await page.evaluate(() => {
+  const d = document.querySelector("#mapHost .tp-marks .tp-mark").getAttribute("d");
+  return TERRAPOP.maps.cn.regions.find(x => x.d === d).id;
+});
+const hkFull = await page.evaluate(id => TERRAPOP.countries.cn.regions.find(r => r.id === id).fullNames["zh-Hans"], hkId);
+await page.locator("#answerArea .tp-answer-input").fill(hkFull);
+await page.keyboard.press("Enter");
+await page.waitForTimeout(200);
+check("揭示正确答案时放大框显示正确色高亮",
+  (await page.locator("#mapHost .tp-mag-marks .tp-mark-correct").count()) === 1);
+await setScopeAll();
+
 // ── 8. 缩放 ──────────────────────────────────────────────────
 section("8. 地图缩放");
 const t0 = await page.getAttribute("#mapHost .tp-viewport", "transform");
@@ -533,6 +565,30 @@ await page.locator("#answerArea .tp-answer-input").fill(enName);
 await page.keyboard.press("Enter");
 await page.waitForTimeout(150);
 check("英文界面下答中文名也算对", (await prevInfo()).verds.includes("Correct"), (await prevInfo()).verds);
+
+// 回归：英文界面 · 已知全称猜简称 · 把界面显示的简称原样填进去必须判对
+await leaveGame();
+await pickChip("knownChips", "full");
+await pickChip("askedChips", "short");
+await pickChip("styleChips", "text");
+await page.click("#btnStart");
+await page.waitForTimeout(300);
+const knownFullEn = (await page.textContent("#knownChip")).trim();
+check("英文界面里题干不含括号注音", !/[()（）]/.test(knownFullEn), knownFullEn);
+const tid9 = await page.evaluate(t => {
+  const r = TERRAPOP.countries.cn.regions.find(x =>
+    t.includes(x.fullNames["en"]) || t.includes(x.names["en"]) || t.includes(x.fullNames["zh-Hans"]));
+  return r ? r.id : null;
+}, knownFullEn);
+const shownShort = await page.evaluate(id =>
+  TERRAPOP.game.shortText(TERRAPOP.countries.cn.regions.find(r => r.id === id)), tid9);
+console.log(`    · ${knownFullEn} 的简称显示为「${shownShort}」`);
+const head9 = await head();
+await page.locator("#answerArea .tp-answer-input").fill(shownShort);
+await page.waitForTimeout(200);
+if ((await head()) === head9) { await page.keyboard.press("Enter"); await page.waitForTimeout(200); }
+check("把界面显示的简称原样提交能判对（多简称也一样）",
+  /Correct/.test((await prevInfo()).verds), (await prevInfo()).verds);
 await page.screenshot({ path: path.join(shots, "09-english.png") });
 
 // ── 10. 设置面板 ─────────────────────────────────────────────
@@ -614,7 +670,7 @@ await pickChip("styleChips", "text");
 await page.evaluate(() => {
   window.__shortIdx = {};
   for (const r of TERRAPOP.countries.cn.regions) {
-    window.__shortIdx[TERRAPOP.game.shortDisplay(r, "zh-Hans")] = r.id;
+    window.__shortIdx[TERRAPOP.game.shortText(r)] = r.id;
   }
 });
 async function currentByShort() {

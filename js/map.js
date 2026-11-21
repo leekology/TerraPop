@@ -481,6 +481,9 @@
           "data-id": id
         }));
       });
+      // 放大框里的高亮层：港澳在主图上太小，高亮也得在小图里来一份
+      var magMarks = U.svgEl("g", { class: "tp-mag-marks" });
+      inner.appendChild(magMarks);
       g.appendChild(inner);
 
       var home = pathPoints(regionById["CN-HK"] ? regionById["CN-HK"].d : regionById[ids[0]].d, 60);
@@ -493,7 +496,7 @@
       var title = U.svgEl("text", { class: "tp-inset-title", x: anchor[0] + 8, y: anchor[1] + boxH - 7 });
       g.appendChild(title);
       viewport.appendChild(g);
-      magnifier = { group: g, title: title };
+      magnifier = { group: g, title: title, marks: magMarks, ids: ids };
       refreshTexts();
     }
 
@@ -526,6 +529,23 @@
     function refreshTexts() {
       if (scsTitle) scsTitle.textContent = T.i18n.t("map.insetSouthChinaSea");
       if (magnifier && magnifier.title) magnifier.title.textContent = T.i18n.t("map.insetHongKongMacao");
+    }
+
+    /** 港澳在主图上只有几个像素宽，高亮要在放大框里同步来一份 */
+    function syncMagMark(id, kind) {
+      if (!magnifier || !magnifier.marks) return;
+      U.clear(magnifier.marks);
+      if (!id || magnifier.ids.indexOf(id) === -1 || !regionById[id]) return;
+      var d = regionById[id].d;
+      // non-scaling-stroke：放大 9 倍时描边线宽不会被一起放大
+      magnifier.marks.appendChild(U.svgEl("path", {
+        class: "tp-mark-halo tp-mark-halo-" + (kind || "given"),
+        d: d, "vector-effect": "non-scaling-stroke"
+      }));
+      magnifier.marks.appendChild(U.svgEl("path", {
+        class: "tp-mark tp-mark-" + (kind || "given"),
+        d: d, "vector-effect": "non-scaling-stroke"
+      }));
     }
 
     host.appendChild(svg);
@@ -708,10 +728,11 @@
       /** 题面已知位置时高亮某个省 */
       highlight: function (id, kind) {
         U.clear(gOverlay);
-        if (!id || !regionPaths[id]) { api.setSpot(null); return; }
+        if (!id || !regionPaths[id]) { api.setSpot(null); syncMagMark(null); return; }
         api.setSpot(id);
         gOverlay.appendChild(U.svgEl("path", { class: "tp-mark-halo tp-mark-halo-" + (kind || "given"), d: regionById[id].d }));
         gOverlay.appendChild(U.svgEl("path", { class: "tp-mark tp-mark-" + (kind || "given"), d: regionById[id].d }));
+        syncMagMark(id, kind || "given");
       },
 
       /** 揭示：把聚光灯移到正确省 + 省会脉动 + 省名标签 + 引线 */
@@ -723,6 +744,7 @@
         api.setSpot(region.id);
         gOverlay.appendChild(U.svgEl("path", { class: "tp-mark-halo tp-mark-halo-" + (status || "correct"), d: regionById[region.id].d }));
         gOverlay.appendChild(U.svgEl("path", { class: "tp-mark tp-mark-" + (status || "correct"), d: regionById[region.id].d }));
+        syncMagMark(region.id, status || "correct");
 
         var pos = regionById[region.id].label || regionById[region.id].center;
         var cap = (mapData.capitals || {})[region.id];
@@ -751,7 +773,7 @@
         gLabels.appendChild(g);
       },
 
-      clearMarks: function () { U.clear(gOverlay); U.clear(gLabels); api.setSpot(null); },
+      clearMarks: function () { U.clear(gOverlay); U.clear(gLabels); api.setSpot(null); syncMagMark(null); },
 
       focusRegion: function (id) {
         var r = regionById[id];

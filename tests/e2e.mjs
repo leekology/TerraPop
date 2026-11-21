@@ -31,6 +31,10 @@ const shots = path.join(root, ".tmp", "shots");
 fs.mkdirSync(shots, { recursive: true });
 const pageUrl = "file://" + path.join(root, "index.html");
 
+// 浏览器通道：本地默认用系统 Edge；CI 里用 TP_CHANNEL=bundled 走 Playwright 自带的 Chromium
+const CHANNEL = process.env.TP_CHANNEL || "msedge";
+const LAUNCH = CHANNEL === "bundled" ? {} : { channel: CHANNEL };
+
 let failures = 0;
 function check(name, cond, extra = "") {
   console.log(`  ${cond ? "✓" : "✗"} ${name}${extra ? " — " + extra : ""}`);
@@ -39,7 +43,7 @@ function check(name, cond, extra = "") {
 function section(t) { console.log(`\n${t}`); }
 
 const errors = [];
-const browser = await chromium.launch({ channel: "msedge", headless: true });
+const browser = await chromium.launch(Object.assign({ headless: true }, LAUNCH));
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
 const page = await context.newPage();
 
@@ -69,6 +73,16 @@ const prevInfo = () => page.evaluate(() => ({
   name: (document.querySelector("#prevCard .tp-prev-name") || {}).textContent || "",
   verds: (document.querySelector("#prevCard .tp-verdict") || {}).textContent || ""
 }));
+async function leaveGame() {
+  if (await page.isHidden("#screenPlay")) return;
+  await page.click("#btnQuit");
+  await page.waitForTimeout(90);
+  if (!(await page.isHidden("#confirmOverlay"))) {
+    await page.click("#btnConfirmLeave");
+    await page.waitForSelector("#confirmOverlay", { state: "hidden" });
+    await page.waitForTimeout(80);
+  }
+}
 const answerBox = () => page.locator("#answerArea").boundingBox();
 
 // ── 1. 首页 ──────────────────────────────────────────────────
@@ -79,6 +93,41 @@ check("已知 / 要猜 / 作答方式各 5 个选项",
   (await page.locator("#styleChips .tp-chip").count()) === 5);
 check("范围 10 个选项", (await page.locator("#scopeChips .tp-chip").count()) === 10);
 await page.screenshot({ path: path.join(shots, "01-home.png") });
+
+// ── 1b. 左上角返回：进行中先确认 ─────────────────────────────
+section("1b. 左上角点回首页：本局进行中要先确认");
+await pickChip("knownChips", "location");
+await pickChip("askedChips", "full");
+await pickChip("styleChips", "text");
+await page.click("#btnStart");
+await page.waitForTimeout(300);
+check("答题时点左上角品牌区会先弹确认框", await (async () => {
+  await page.click("#btnBrand");
+  await page.waitForTimeout(120);
+  return !(await page.isHidden("#confirmOverlay"));
+})());
+check("确认框说明还没答过题", /还没答过|haven't answered/.test(await page.textContent("#confirmBody")));
+await page.click("#btnConfirmStay");
+await page.waitForSelector("#confirmOverlay", { state: "hidden" });
+check("选「继续答题」留在本局，且计时恢复", await page.isHidden("#confirmOverlay") && !(await page.isHidden("#screenPlay")));
+
+// 答一题，让确认文案带上已答题数
+await page.locator("#answerArea .tp-answer-input").fill("随便写");
+await page.keyboard.press("Enter");
+await page.waitForTimeout(120);
+await page.click("#btnQuit");
+await page.waitForSelector("#confirmOverlay:not([hidden])");
+check("确认框写明已答题量", /已经答了|answered 1/.test(await page.textContent("#confirmBody")),
+  await page.textContent("#confirmBody"));
+await page.screenshot({ path: path.join(shots, "01b-confirm.png") });
+await page.click("#btnConfirmLeave");
+await page.waitForSelector("#confirmOverlay", { state: "hidden" });
+check("选「退出本局」回到首页", !(await page.isHidden("#screenHome")) && await page.isHidden("#screenPlay"));
+check("首页时长按左上角不会弹确认框", await (async () => {
+  await page.click("#btnBrand");
+  await page.waitForTimeout(120);
+  return await page.isHidden("#confirmOverlay");
+})());
 
 // ── 2. 第一题：上方卡片是玩法说明 ────────────────────────────
 section("2. 开场：上方卡片是玩法说明");
@@ -167,7 +216,7 @@ check("答错时上方卡片也照常更新", (await prevInfo()).isAnswer);
 
 // ── 5. 选择题：问题在上、选项在下 ────────────────────────────
 section("5. 选择题：问题在上，选项在下");
-await page.click("#btnQuit");
+await leaveGame();
 await page.waitForTimeout(150);
 await pickChip("knownChips", "short");
 await pickChip("askedChips", "capital");
@@ -202,7 +251,7 @@ await page.screenshot({ path: path.join(shots, "05-choice.png") });
 
 // ── 6. 定位题：点地图 ────────────────────────────────────────
 section("6. 定位题：点地图作答");
-await page.click("#btnQuit");
+await leaveGame();
 await page.waitForTimeout(150);
 await pickChip("knownChips", "full");
 await pickChip("askedChips", "location");
@@ -233,7 +282,7 @@ check("点对了判为答对", p6.verds.includes("答对"), p6.verds);
 
 // ── 7. 地图：低调配色 + 聚光灯 ───────────────────────────────
 section("7. 地图：低调配色与聚光灯");
-await page.click("#btnQuit");
+await leaveGame();
 await page.waitForTimeout(150);
 await pickChip("knownChips", "location");
 await pickChip("askedChips", "capital");
@@ -277,7 +326,7 @@ check("复位按钮还原视图", (await page.getAttribute("#mapHost .tp-viewpor
 
 // ── 9. 英文界面 ──────────────────────────────────────────────
 section("9. 英文界面");
-await page.click("#btnQuit");
+await leaveGame();
 await page.waitForTimeout(150);
 await page.selectOption("#langSelect", "en");
 await page.waitForTimeout(300);
@@ -302,7 +351,7 @@ await page.screenshot({ path: path.join(shots, "09-english.png") });
 
 // ── 10. 设置面板 ─────────────────────────────────────────────
 section("10. 设置面板");
-await page.click("#btnQuit");
+await leaveGame();
 await page.waitForTimeout(150);
 await page.click("#btnSettings");
 await page.waitForSelector("#settingsOverlay:not([hidden])");
@@ -358,7 +407,7 @@ for (const style of ["text", "choice3", "choice4"]) {
       if (h0 === (await head())) problems.push(tag + ": 提交后没有立刻换题");
       if (!(await prevInfo()).isAnswer) problems.push(tag + ": 上一题信息没进上方卡片");
       if ((await prevInfo()).cells !== 4) problems.push(tag + ": 上方卡片缺信息");
-      await page.click("#btnQuit");
+      await leaveGame();
       await page.waitForTimeout(60);
     }
   }
@@ -368,7 +417,7 @@ check(`12 组合 × 3 作答方式 = ${combos} 种配置都能出题、零阻断
 
 // ── 12. 结算 ─────────────────────────────────────────────────
 section("12. 结算：含总耗时");
-if (!(await page.isHidden("#screenPlay"))) await page.click("#btnQuit");
+await leaveGame();
 await page.waitForTimeout(150);
 if (await page.isHidden("#screenHome")) { await page.click("#btnHome"); await page.waitForTimeout(150); }
 await pickChip("scopeChips", "group:north");

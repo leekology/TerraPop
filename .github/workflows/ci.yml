@@ -1,0 +1,63 @@
+# 持续集成：自检 + 浏览器端到端
+# ---------------------------------------------------------------
+# 和 Pages 部署分开：部署只闸在确定性的 selfcheck 上，
+# 而端到端跑在 CI 里当作信号（涉及真实浏览器与时间，偶发不稳定不该卡住发版）。
+#
+# 本地默认用系统 Edge；这里用 TP_CHANNEL=bundled 走 Playwright 自带的 Chromium。
+
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: 自检 + 端到端
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 数据与规则自检
+        run: node scripts/selfcheck.mjs
+
+      - name: 缓存 Playwright 浏览器
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-chromium
+
+      - name: 安装 Playwright 与 Chromium
+        run: |
+          set -euo pipefail
+          npm install --no-save --no-package-lock playwright
+          npx playwright install --with-deps chromium
+
+      - name: 端到端验收
+        env:
+          TP_CHANNEL: bundled
+        run: node tests/e2e.mjs
+
+      - name: 上传截图
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-screenshots
+          path: .tmp/shots
+          if-no-files-found: ignore
+          retention-days: 7

@@ -63,7 +63,8 @@
     globalDeadline: 0,
     mapGen: 0,
     beatPending: false,
-    startedAt: 0
+    startedAt: 0,
+    timerLeft: 0
   };
 
   var el = {};
@@ -368,6 +369,34 @@
     buildHome();
   }
 
+  /** 本局是否正在进行（有题目还没答完，且正停在答题屏） */
+  function inProgress() {
+    var s = state.session;
+    return !!(s && !s.finished && !el.screenPlay.hidden);
+  }
+
+  /** 左上角 / 面板里的 ⌂ 都走这里：进行中先确认 */
+  function requestHome() {
+    if (inProgress()) { showConfirm(); return; }
+    quitToHome();
+  }
+
+  function showConfirm() {
+    var s = state.session;
+    el.confirmBody.textContent = s.answeredCount
+      ? t("confirm.body", { done: s.answeredCount, best: s.bestCombo })
+      : t("confirm.bodyFresh");
+    pauseTimer();
+    showOverlay(el.confirmOverlay);
+    setTimeout(function () { try { el.btnConfirmStay.focus(); } catch (e) {} }, 40);
+  }
+
+  function dismissConfirm(stay) {
+    hideOverlay(el.confirmOverlay);
+    if (stay) resumeTimer();
+    else quitToHome();
+  }
+
   function updateHud() {
     var s = state.session;
     if (!s) return;
@@ -660,12 +689,12 @@
     stopTimer();
     el.qTimer.hidden = false;
     if (ms > 0) {
-      var left = ms;
-      tickTimer(left);
+      state.timerLeft = ms;
+      tickTimer(state.timerLeft);
       state.timerHandle = setInterval(function () {
-        left -= 100;
-        tickTimer(left);
-        if (left <= 0) { stopTimer(); if (state.phase === "ask") commit({ kind: "skip" }); }
+        state.timerLeft -= 100;
+        tickTimer(state.timerLeft);
+        if (state.timerLeft <= 0) { stopTimer(); if (state.phase === "ask") commit({ kind: "skip" }); }
       }, 100);
     } else {
       state.timerHandle = setInterval(function () {
@@ -674,6 +703,16 @@
         el.qTimer.textContent = Math.ceil(l / 1000) + "s";
       }, 200);
     }
+  }
+
+  /** 暂停计时（打开确认框时用）：保留剩余时间 */
+  function pauseTimer() { stopTimer(); }
+
+  /** 继续答题时恢复计时；全局倒计时是绝对时点，会照常走完 */
+  function resumeTimer() {
+    if (state.phase !== "ask") return;
+    if (settings.timer === "perQuestion") startTimer(Math.max(3000, state.timerLeft || 20000));
+    else if (settings.timer === "global") startTimer(0);
   }
 
   function tickTimer(left) {
@@ -858,10 +897,11 @@
     ["screenHome", "screenPlay", "screenSummary", "mapHost", "mapLegend",
       "qCounter", "qTimer", "comboBadge", "progressFill", "hudScore", "hudAcc",
       "prevCard", "knownChip", "askText", "hintBar", "answerArea",
-      "btnZoomIn", "btnZoomOut", "btnZoomReset", "btnStart",
+      "btnZoomIn", "btnZoomOut", "btnZoomReset", "btnStart", "btnBrand",
       "knownChips", "askedChips", "styleChips", "scopeChips", "configSummary",
       "homeRegionCount", "langSelect", "btnSettings", "btnSettingsClose", "settingsOverlay",
-      "settingsBody", "btnRestart", "btnHome", "btnQuit", "toast", "summaryBody"
+      "settingsBody", "btnRestart", "btnHome", "btnQuit", "toast", "summaryBody",
+      "confirmOverlay", "confirmBody", "btnConfirmStay", "btnConfirmLeave"
     ].forEach(function (id) { el[id] = document.getElementById(id); });
   }
 
@@ -870,7 +910,10 @@
     el.btnSettings.addEventListener("click", function () { buildSettings(); showOverlay(el.settingsOverlay); });
     el.btnSettingsClose.addEventListener("click", function () { hideOverlay(el.settingsOverlay); });
     el.btnStart.addEventListener("click", startGame);
-    el.btnQuit.addEventListener("click", quitToHome);
+    el.btnBrand.addEventListener("click", requestHome);
+    el.btnQuit.addEventListener("click", requestHome);
+    el.btnConfirmStay.addEventListener("click", function () { dismissConfirm(true); });
+    el.btnConfirmLeave.addEventListener("click", function () { dismissConfirm(false); });
     el.btnZoomIn.addEventListener("click", function () { state.mapView && state.mapView.zoomIn(); });
     el.btnZoomOut.addEventListener("click", function () { state.mapView && state.mapView.zoomOut(); });
     el.btnZoomReset.addEventListener("click", function () { state.mapView && state.mapView.resetView(); });
@@ -878,8 +921,12 @@
     el.btnHome.addEventListener("click", function () { showScreen("home"); buildHome(); });
 
     document.addEventListener("keydown", function (e) {
-      if (!el.settingsOverlay.hidden) {
-        if (e.key === "Escape") hideOverlay(el.settingsOverlay);
+      var overlayOpen = !el.settingsOverlay.hidden || !el.confirmOverlay.hidden;
+      if (overlayOpen) {
+        if (e.key === "Escape") {
+          if (!el.confirmOverlay.hidden) { dismissConfirm(true); return; }
+          hideOverlay(el.settingsOverlay);
+        }
         return;
       }
       if (el.screenPlay.hidden || state.phase !== "ask") return;

@@ -6,12 +6,14 @@
 <meta name="color-scheme" content="light">
 <meta name="description" content="TerraPop — 卡通中国地图上的省市简称 / 省会 / 位置竞猜记忆游戏，一问一答、连击冲分。">
 <title>TerraPop · 省市简称与省会竞猜</title>
+<!-- 内联 data URI 图标：不产生额外请求，也就不会有 404 -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23cfe9f7'/%3E%3Cpath d='M4 20.5c3.4-4.6 7-6.9 12-6.9s8.6 2.3 12 6.9' fill='none' stroke='%237cbb84' stroke-width='3.4' stroke-linecap='round'/%3E%3Ccircle cx='16' cy='9.8' r='3.2' fill='%23ff7043'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 
 <header class="tp-topbar">
-  <div class="tp-brand">
+  <button type="button" class="tp-brand" id="btnBrand" data-i18n-title="action.backHome" title="返回首页">
     <span class="tp-brand-mark" aria-hidden="true">
       <svg viewBox="0 0 32 32" width="28" height="28">
         <circle cx="16" cy="16" r="14.5" class="tp-brand-sea"/>
@@ -24,7 +26,7 @@
       <strong data-i18n="app.title">TerraPop</strong>
       <small data-i18n="app.subtitle">省市简称 · 省会 · 位置</small>
     </span>
-  </div>
+  </button>
 
   <div class="tp-topbar-actions">
     <label class="tp-select-wrap">
@@ -142,6 +144,22 @@
   </section>
 
 </main>
+
+<!-- ── 退出确认（本局进行中时点左上角返回）─────────────── -->
+<div class="tp-overlay" id="confirmOverlay" hidden>
+  <div class="tp-modal tp-modal-confirm" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle">
+    <div class="tp-modal-head">
+      <h2 id="confirmTitle" data-i18n="confirm.title">要离开本局吗？</h2>
+    </div>
+    <div class="tp-modal-body">
+      <p class="tp-confirm-body" id="confirmBody"></p>
+    </div>
+    <div class="tp-panel-actions tp-actions-center tp-modal-foot">
+      <button type="button" class="tp-btn tp-btn-primary" id="btnConfirmStay" data-i18n="confirm.stay">继续答题</button>
+      <button type="button" class="tp-btn tp-btn-ghost" id="btnConfirmLeave" data-i18n="confirm.leave">退出本局</button>
+    </div>
+  </div>
+</div>
 
 <!-- ── 设置 ───────────────────────────────────────────────── -->
 <div class="tp-overlay" id="settingsOverlay" hidden>

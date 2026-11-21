@@ -86,6 +86,12 @@ window.TERRAPOP.locales["zh-Hans"] = {
   "action.zoomOut": "缩小",
   "action.zoomReset": "复位",
 
+  "confirm.title": "要离开本局吗？",
+  "confirm.body": "本局已经答了 {done} 题（最高 {best} 连击）。离开会清空分数与连击，回到首页重新配置玩法。",
+  "confirm.bodyFresh": "本局还没答过题。离开会回到首页重新配置玩法。",
+  "confirm.stay": "继续答题",
+  "confirm.leave": "退出本局",
+
   "feedback.correct": "答对了",
   "feedback.close": "很接近",
   "feedback.wrong": "答错了",

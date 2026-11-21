@@ -45,9 +45,21 @@ scripts/
   README.md
 tests/
   e2e.mjs                  Playwright + Edge headless 端到端验收（需全局 playwright）
+.github/workflows/
+  pages.yml                自检 + 组装 _site + 部署到 GitHub Pages
+  ci.yml                   自检 + 浏览器端到端（chromium）
 docs/
-  plan.md  design.md  architecture.md  data-schema.md  i18n.md  attribution.md
+  plan.md  design.md  architecture.md  data-schema.md  i18n.md  deploy.md  attribution.md
 ```
+
+## 部署
+
+- `.github/workflows/pages.yml`：push `main` → 跑 `scripts/selfcheck.mjs` 当闸门 →
+  组装 `_site/`（只带 `index.html css js locales data maps`）→ 部署到 GitHub Pages。
+- `.github/workflows/ci.yml`：自检 + 端到端（`TP_CHANNEL=bundled` 走自带 Chromium）。
+- 页面内所有引用都是相对路径，放在 `https://<user>.github.io/<repo>/` 子路径下直接可用；
+  这一点有专门的验证（把组装好的站点放进本地 HTTP 服务的子目录再打开，断言资源全 200、无报错）。
+- 无构建步骤、无 CDN 依赖：`file://` 双击打开也能玩。详见 `docs/deploy.md`。
 
 ## 运行时数据流
 

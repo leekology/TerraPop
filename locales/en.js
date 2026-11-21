@@ -83,6 +83,12 @@ window.TERRAPOP.locales.en = {
   "action.zoomOut": "Zoom out",
   "action.zoomReset": "Reset view",
 
+  "confirm.title": "Leave this round?",
+  "confirm.body": "You have answered {done} questions (best combo {best}). Leaving clears your score and combo and takes you back to the setup screen.",
+  "confirm.bodyFresh": "You haven't answered anything yet. Leaving takes you back to the setup screen.",
+  "confirm.stay": "Keep playing",
+  "confirm.leave": "Leave",
+
   "feedback.correct": "Correct",
   "feedback.close": "Close",
   "feedback.wrong": "Wrong",

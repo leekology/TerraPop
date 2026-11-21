@@ -59,7 +59,16 @@ body {
   backdrop-filter: saturate(1.4) blur(10px);
   border-bottom: 1px solid var(--line);
 }
-.tp-brand { display: flex; align-items: center; gap: 9px; }
+.tp-brand {
+  display: flex; align-items: center; gap: 9px;
+  padding: 4px 6px 4px 4px; margin: -4px 0 -4px -4px;
+  border: 0; background: none; font: inherit; color: inherit;
+  border-radius: 12px; cursor: pointer; text-align: left;
+  transition: background .15s;
+}
+.tp-brand:hover { background: #f2f9fd; }
+.tp-brand:active { transform: translateY(1px); }
+.tp-brand:disabled { cursor: default; }
 .tp-brand-sea { fill: #cfe9f7; stroke: #8fc6e2; stroke-width: 1.4; }
 .tp-brand-land { fill: #b6e2b3; stroke: #7cbb84; stroke-width: 1.4; stroke-linejoin: round; }
 .tp-brand-dot { fill: var(--coral); }
@@ -466,6 +475,9 @@ body {
 .tp-modal-head h2 { margin: 0; font-size: 19px; }
 .tp-modal-head .tp-close { margin-left: auto; }
 .tp-modal-body { padding: 16px 18px 20px; overflow-y: auto; flex: 1 1 auto; min-height: 0; }
+.tp-modal-confirm { max-width: 420px; }
+.tp-confirm-body { margin: 0; font-size: 14px; line-height: 1.8; color: var(--ink-2); }
+.tp-modal-foot { padding: 0 18px 18px; margin-top: 0 !important; }
 .tp-set-group { margin-bottom: 18px; }
 .tp-set-group h3 { margin: 0 0 9px; font-size: 12.5px; color: var(--ink-soft); font-weight: 700; }
 .tp-toggle { display: flex; align-items: center; gap: 10px; padding: 7px 2px; font-size: 14px; cursor: pointer; color: var(--ink-2); }

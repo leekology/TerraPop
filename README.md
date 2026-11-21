@@ -44,6 +44,15 @@ open index.html          # macOS；或直接双击 index.html
 > 如果你更习惯本地 HTTP 服务：`python3 -m http.server` 后访问 `http://localhost:8000`
 > （两种方式都支持，`file://` 直开是本项目的硬性目标）
 
+## 在线版 / 部署
+
+推到 `main` 会由 `.github/workflows/pages.yml` 自动校验并发布到 **GitHub Pages**
+（首次需要在仓库 Settings → Pages 把 Source 选成 **GitHub Actions**）。
+
+发布前会先跑 `scripts/selfcheck.mjs` 当闸门；浏览器端到端跑在 `ci.yml` 里当信号。
+所有资源都是相对路径，放在 `https://<user>.github.io/<repo>/` 子路径下直接可用。
+细节见 [`docs/deploy.md`](docs/deploy.md)。
+
 ## 怎么玩
 
 首页上三个旋钮组合出玩法：
@@ -79,6 +88,7 @@ docs/               计划、设计、架构、数据模型、i18n、授权说�
 - [技术架构](docs/architecture.md) —— 地图图层顺序、关键接口
 - [数据模型与判定规则](docs/data-schema.md)
 - [多语言与多国家扩展](docs/i18n.md)
+- [部署与持续集成](docs/deploy.md) —— GitHub Pages 流程、CI、TP_CHANNEL
 - [数据来源与授权](docs/attribution.md)
 
 ## 重新生成地图数据

@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<meta name="description" content="TerraPop — 手绘羊皮纸风中国地图，省市简称 / 省会 / 位置竞猜记忆游戏。">
+<title>TerraPop · 省市简称与省会竞猜</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="tp-backdrop" aria-hidden="true"></div>
+
+<header class="tp-topbar">
+  <div class="tp-brand">
+    <span class="tp-brand-mark" aria-hidden="true">
+      <svg viewBox="0 0 32 32" width="28" height="28">
+        <circle cx="16" cy="16" r="14" class="tp-brand-ring"/>
+        <path d="M6 20c3-4 6-6 10-6s7 2 10 6" class="tp-brand-line"/>
+        <circle cx="16" cy="11" r="3" class="tp-brand-dot"/>
+      </svg>
+    </span>
+    <span class="tp-brand-text">
+      <strong data-i18n="app.title">TerraPop</strong>
+      <small data-i18n="app.subtitle">省市简称 · 省会 · 位置</small>
+    </span>
+  </div>
+
+  <div class="tp-scores" id="scoreBar" hidden>
+    <span class="tp-chip">
+      <em data-i18n="score.points">得分</em>
+      <b id="scoreValue">0</b>
+    </span>
+    <span class="tp-chip tp-chip-combo" id="comboChip" hidden>
+      <em data-i18n="score.combo">连击</em>
+      <b id="comboValue">0</b>
+    </span>
+  </div>
+
+  <div class="tp-topbar-actions">
+    <label class="tp-select-wrap">
+      <span class="tp-sr-only" data-i18n="settings.language">界面语言</span>
+      <select id="langSelect" class="tp-select"></select>
+    </label>
+    <button type="button" class="tp-icon-btn" id="btnSettings" data-i18n-title="settings.title" title="设置">
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+        <path d="M12 15.5A3.5 3.5 0 1 0 12 8.5a3.5 3.5 0 0 0 0 7z"/>
+        <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.9 2.9l-.1-.1a1.7 1.7 0 0 0-2.9 1.2V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 7 19.4l-.1.1a2 2 0 1 1-2.9-2.9l.1-.1A1.7 1.7 0 0 0 3 13.6H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 7l-.1-.1a2 2 0 1 1 2.9-2.9l.1.1A1.7 1.7 0 0 0 10 2.6H10a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.9 2.9l-.1.1a1.7 1.7 0 0 0 1.2 2.9H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1.3z"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<main class="tp-main">
+
+  <!-- ── 首页 ─────────────────────────────────────────────── -->
+  <section class="tp-screen" id="screenHome">
+    <div class="tp-home">
+      <div class="tp-home-lead">
+        <h1 data-i18n="app.title">TerraPop</h1>
+        <p class="tp-tagline" data-i18n="app.tagline"></p>
+      </div>
+
+      <div class="tp-card tp-card-parchment">
+        <h2 class="tp-card-title" data-i18n="home.mode">玩法</h2>
+        <div class="tp-mode-list" id="homeModeList" role="radiogroup"></div>
+      </div>
+
+      <div class="tp-card tp-card-parchment">
+        <h2 class="tp-card-title" data-i18n="scope.title">范围</h2>
+        <div class="tp-scope-list" id="homeScopeList"></div>
+        <p class="tp-hint-line" id="homeRegionCount"></p>
+      </div>
+
+      <div class="tp-card tp-card-plain">
+        <h2 class="tp-card-title" data-i18n="home.howto.title">怎么玩</h2>
+        <p class="tp-howto" data-i18n="home.howto.body"></p>
+      </div>
+
+      <div class="tp-home-cta">
+        <button type="button" class="tp-btn tp-btn-primary tp-btn-lg" id="btnStart" data-i18n="home.startCta">开始挑战</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── 答题 ─────────────────────────────────────────────── -->
+  <section class="tp-screen" id="screenPlay" hidden>
+    <div class="tp-play">
+
+      <div class="tp-map-pane">
+        <div class="tp-map-host" id="mapHost" aria-live="polite"></div>
+        <div class="tp-map-controls">
+          <button type="button" class="tp-icon-btn" id="btnZoomIn" data-i18n-title="action.zoomIn" title="放大">＋</button>
+          <button type="button" class="tp-icon-btn" id="btnZoomOut" data-i18n-title="action.zoomOut" title="缩小">－</button>
+          <button type="button" class="tp-icon-btn" id="btnZoomReset" data-i18n-title="action.zoomReset" title="复位">⌖</button>
+        </div>
+        <p class="tp-map-tip" data-i18n="map.labelHint"></p>
+      </div>
+
+      <aside class="tp-panel">
+        <div class="tp-panel-head">
+          <button type="button" class="tp-icon-btn tp-quit-btn" id="btnQuit" data-i18n-title="action.backHome" title="返回首页">⌂</button>
+          <span class="tp-counter" id="qCounter"></span>
+          <span class="tp-progress" id="qProgress"></span>
+          <span class="tp-timer" id="qTimer" hidden></span>
+        </div>
+
+        <div class="tp-known" id="knownCard"></div>
+
+        <div class="tp-question" id="questionArea"></div>
+        <div class="tp-hints" id="hintBar"></div>
+        <div class="tp-answers" id="answerArea"></div>
+
+        <div class="tp-panel-actions">
+          <button type="button" class="tp-btn tp-btn-primary" id="btnSubmit" data-i18n="action.submit">提交</button>
+          <button type="button" class="tp-btn tp-btn-ghost" id="btnSkip" data-i18n="action.skip">跳过</button>
+          <button type="button" class="tp-btn tp-btn-ghost tp-btn-mic" id="btnMic" data-i18n-title="action.mic" title="语音作答">
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+              <path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3z"/>
+              <path d="M18 11a6 6 0 0 1-12 0M12 18v3"/>
+            </svg>
+          </button>
+        </div>
+      </aside>
+
+    </div>
+  </section>
+
+  <!-- ── 结算 ─────────────────────────────────────────────── -->
+  <section class="tp-screen" id="screenSummary" hidden>
+    <div class="tp-card tp-card-parchment tp-summary">
+      <h2 class="tp-card-title" data-i18n="summary.title">本局结束</h2>
+      <div class="tp-summary-grid" id="summaryBody"></div>
+      <div class="tp-panel-actions tp-actions-center">
+        <button type="button" class="tp-btn tp-btn-primary" id="btnRestart" data-i18n="action.restart">再来一局</button>
+        <button type="button" class="tp-btn tp-btn-ghost" id="btnHome" data-i18n="action.backHome">返回首页</button>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ── 揭示卡 ─────────────────────────────────────────────── -->
+<div class="tp-overlay" id="revealOverlay" hidden>
+  <div class="tp-modal tp-modal-reveal" role="dialog" aria-modal="true" aria-labelledby="revealTitle">
+    <div class="tp-reveal-head">
+      <span class="tp-verdict" id="revealBadge"></span>
+      <h2 id="revealTitle"></h2>
+      <button type="button" class="tp-icon-btn tp-close" id="btnRevealSpeak" data-i18n-title="action.speak" title="朗读">🔊</button>
+    </div>
+    <div class="tp-reveal-body" id="revealBody"></div>
+    <div class="tp-panel-actions tp-actions-center">
+      <button type="button" class="tp-btn tp-btn-primary" id="btnRevealNext" data-i18n="action.next">下一题</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── 设置 ───────────────────────────────────────────────── -->
+<div class="tp-overlay" id="settingsOverlay" hidden>
+  <div class="tp-modal tp-modal-settings" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <div class="tp-reveal-head">
+      <h2 id="settingsTitle" data-i18n="settings.title">设置</h2>
+      <button type="button" class="tp-icon-btn tp-close" id="btnSettingsClose" aria-label="close">✕</button>
+    </div>
+    <div class="tp-reveal-body" id="settingsBody"></div>
+  </div>
+</div>
+
+<div class="tp-toast" id="toast" hidden></div>
+
+<!-- ─────────────────────────────────────────────────────────
+     按依赖顺序加载；全部为传统脚本，file:// 直接可用。
+     ───────────────────────────────────────────────────────── -->
+<script src="data/han-variants.js"></script>
+<script src="js/core.js"></script>
+<script src="locales/zh-Hans.js"></script>
+<script src="locales/en.js"></script>
+<script src="js/i18n.js"></script>
+<script src="js/voice.js"></script>
+<script src="data/cn.js"></script>
+<script src="data/cn.wiki.js"></script>
+<script src="data/cn.terrain.js"></script>
+<script src="maps/cn.js"></script>
+<script src="js/map.js"></script>
+<script src="js/game.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

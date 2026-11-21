@@ -285,8 +285,71 @@ check("地图与面板在窄屏下纵向堆叠", panelBox.y >= mapBox.y + mapBox
   `map.y=${Math.round(mapBox.y)}+${Math.round(mapBox.height)} panel.y=${Math.round(panelBox.y)}`);
 await page.screenshot({ path: path.join(shots, "09-mobile.png"), fullPage: false });
 
-// ── 10. 控制台干净 ───────────────────────────────────────────
-section("10. 运行期无报错");
+// ── 10. 所有玩法 × 作答方式 矩阵冒烟 ─────────────────────────
+section("10. 所有玩法 × 作答方式 矩阵冒烟");
+await page.setViewportSize({ width: 1440, height: 900 });
+await page.waitForTimeout(200);
+await page.click("#btnQuit");
+await page.waitForTimeout(200);
+
+async function pickInput(name, value) {
+  await page.evaluate(([n, v]) => {
+    const i = document.querySelector(`input[name="${n}"][value="${v}"]`);
+    if (!i) return;
+    i.checked = true;
+    i.dispatchEvent(new Event("change", { bubbles: true }));
+  }, [name, value]);
+  await page.waitForTimeout(60);
+}
+
+const allModes = await page.$$eval("#homeModeList .tp-option", els => els.map(e => e.dataset.mode));
+const problems = [];
+let combos = 0;
+
+for (const inputMode of ["text", "choice", "mixed"]) {
+  await page.click("#btnSettings");
+  await page.waitForSelector("#settingsOverlay:not([hidden])");
+  await pickInput("set-settings.inputMode", inputMode);
+  await page.click("#btnSettingsClose");
+  await page.waitForTimeout(150);
+
+  for (const mode of allModes) {
+    combos++;
+    await pickInput("tp-mode", mode);
+    await page.click("#btnStart");
+    await page.waitForTimeout(220);
+
+    const rows = await page.$$eval("#answerArea .tp-answer-row", r => r.map(x => x.dataset.dim));
+    const inputs = await page.locator("#answerArea .tp-input").count();
+    const choices = await page.locator("#answerArea .tp-choice-btn").count();
+    const textDims = rows.filter(d => d !== "location").length;
+
+    if (!rows.length) problems.push(`${mode}/${inputMode}: 没有作答行`);
+    if (rows.includes("location") && (await page.locator("#answerArea .tp-location-box").count()) !== 1) {
+      problems.push(`${mode}/${inputMode}: 缺位置点选区`);
+    }
+    // 非位置维度：填空模式应有 N 个输入框；选择模式每个维度应有 4 个选项
+    if (inputMode === "text" && inputs !== textDims) problems.push(`${mode}/${inputMode}: 填空数 ${inputs} ≠ ${textDims}`);
+    if (inputMode === "choice" && choices !== textDims * 4) problems.push(`${mode}/${inputMode}: 选项数 ${choices} ≠ ${textDims * 4}`);
+
+    // 选择模式随手点一个选项，走完提交链路
+    if (choices) await page.locator("#answerArea .tp-choice-btn").first().click();
+    await page.click("#btnSubmit");
+    await page.waitForSelector("#revealOverlay:not([hidden])");
+    if ((await page.locator("#revealBody .tp-wiki-section").count()) !== 3) {
+      problems.push(`${mode}/${inputMode}: 揭示卡百科分区不全`);
+    }
+    await page.click("#btnRevealNext");
+    await page.waitForTimeout(150);
+    await page.click("#btnQuit");
+    await page.waitForTimeout(150);
+  }
+}
+check(`5 种玩法 × 3 种作答方式共 ${combos} 种组合都能出题、作答、揭示`,
+  problems.length === 0, problems.slice(0, 6).join(" | "));
+
+// ── 11. 控制台干净 ───────────────────────────────────────────
+section("11. 运行期无报错");
 check("没有 console error / pageerror / 资源加载失败", errors.length === 0, errors.slice(0, 5).join(" | "));
 
 await browser.close();

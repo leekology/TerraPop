@@ -17,6 +17,9 @@
 
 生成过程记录在 `scripts/build-map.mjs`，可复现：脚本只做投影、抽稀、裁剪与格式转换，不引入额外几何。
 
+为了让构建可以完全离线复现，原始边界数据作为构建输入随仓库提交在
+`scripts/data/cn-province-boundaries.json`（约 570 KB），它同样**不受 MIT 授权覆盖**。
+
 ## 行政区域与百科文本
 
 `data/cn.js` 与 `data/cn.wiki.js` 中的行政区名称、简称、省会（首府）、

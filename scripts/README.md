@@ -19,13 +19,13 @@ node scripts/build-map.mjs
 
 | 文件 | 说明 |
 | --- | --- |
-| `.tmp/cn_full.json` | DataV.GeoAtlas `https://geo.datav.aliyun.com/areas_v3/bound/100000_full.json`。FeatureCollection，35 个 feature：34 个省级行政区 + 一个 `properties.adcode === "100000_JD"` 的九段线。几何为 `Polygon`/`MultiPolygon`，坐标是 `[lon, lat]`，未投影。 |
-| `.tmp/capitals.json` | 34 项「省份 id → 省会 `[lon, lat]`」，`_comment` 等以 `_` 开头的键会被跳过。 |
+| `scripts/data/cn-province-boundaries.json` | DataV.GeoAtlas `https://geo.datav.aliyun.com/areas_v3/bound/100000_full.json`。FeatureCollection，35 个 feature：34 个省级行政区 + 一个 `properties.adcode === "100000_JD"` 的九段线。几何为 `Polygon`/`MultiPolygon`，坐标是 `[lon, lat]`，未投影。 |
+| `scripts/data/cn-capitals.json` | 34 项「省份 id → 省会 `[lon, lat]`」，`_comment` 等以 `_` 开头的键会被跳过。 |
 
-这两个文件是**预置输入**，脚本不会去下载它们。真要重新下载时才需要联网，且本机 proxy 变量是坏的，得绕过代理：
+这两个文件随仓库一起提交（共约 580 KB），**预置输入**，脚本不会去下载它们。真要重新下载时才需要联网，且本机 proxy 变量是坏的，得绕过代理：
 
 ```bash
-curl --noproxy '*' -o .tmp/cn_full.json https://geo.datav.aliyun.com/areas_v3/bound/100000_full.json
+curl --noproxy '*' -o scripts/data/cn-province-boundaries.json https://geo.datav.aliyun.com/areas_v3/bound/100000_full.json
 ```
 
 ## 输出格式（`maps/cn.js`）

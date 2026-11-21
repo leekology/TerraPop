@@ -4,12 +4,12 @@
  *
  * 特点：
  *   - 零依赖（只用 Node 内置模块），`node scripts/build-map.mjs` 直接运行。
- *   - 全部离线：输入数据已预先放在 .tmp/ 下，不联网。
+ *   - 全部离线：输入数据已随仓库放在 scripts/data/ 下，不联网。
  *   - 产物是普通 <script> 可加载的全局赋值脚本（挂到 window.TERRAPOP.maps.cn）。
  *
  * 输入：
- *   .tmp/cn_full.json  DataV.GeoAtlas 100000_full.json（35 个 feature：34 省级 + 九段线）
- *   .tmp/capitals.json 34 项 省份 id -> [lon, lat]
+ *   scripts/data/cn-province-boundaries.json  DataV.GeoAtlas 100000_full.json（35 个 feature：34 省级 + 九段线）
+ *   scripts/data/cn-capitals.json 34 项 省份 id -> [lon, lat]
  *
  * 输出：
  *   maps/cn.js              运行时资源
@@ -27,8 +27,8 @@ import { fileURLToPath } from 'node:url';
 // ---------------------------------------------------------------- 配置
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const SRC_FULL = path.join(ROOT, '.tmp', 'cn_full.json');
-const SRC_CAPITALS = path.join(ROOT, '.tmp', 'capitals.json');
+const SRC_FULL = path.join(ROOT, 'scripts', 'data', 'cn-province-boundaries.json');
+const SRC_CAPITALS = path.join(ROOT, 'scripts', 'data', 'cn-capitals.json');
 const OUT_JS = path.join(ROOT, 'maps', 'cn.js');
 const OUT_SVG = path.join(ROOT, '.tmp', 'cn-preview.svg');
 

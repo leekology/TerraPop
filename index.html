@@ -88,7 +88,7 @@
         </div>
         <div class="tp-chip-row" id="scopePresets"></div>
         <p class="tp-hint-line" id="homeRegionCount"></p>
-        <p class="tp-hint-line tp-scope-tip" id="scopeTip" hidden></p>
+        <div class="tp-scope-tip" id="scopeTip" hidden></div>
       </div>
 
       <div class="tp-card tp-card-plain">
@@ -188,6 +188,18 @@
 </div>
 
 <div class="tp-toast" id="toast" hidden></div>
+
+<!-- ── 首次进入（小屏）的三步引导 ───────────────────────────── -->
+<div class="tp-overlay" id="onboard" hidden>
+  <div class="tp-modal tp-onboard" role="dialog" aria-modal="true" aria-labelledby="onboardTitle">
+    <div class="tp-onboard-body" id="onboardBody"></div>
+    <div class="tp-onboard-dots" id="onboardDots"></div>
+    <div class="tp-panel-actions tp-onboard-actions">
+      <button type="button" class="tp-btn tp-btn-ghost" id="btnOnboardSkip"></button>
+      <button type="button" class="tp-btn tp-btn-primary" id="btnOnboardNext"></button>
+    </div>
+  </div>
+</div>
 
 <!-- ── 移动端「上一题」详情（小屏只留一行结果，点开看全套）──── -->
 <div class="tp-overlay tp-sheet" id="infoSheet" hidden>

@@ -172,6 +172,35 @@ body {
 .tp-mode-desc { margin: 10px 0 0; font-size: 13px; line-height: 1.7; color: var(--ink-2); }
 .tp-chip-row { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
 .tp-hint-line.tp-config-warn { color: var(--bad); background: none; border: none; font-weight: 700; }
+
+/* 手机端「一键只玩某个大区」的提示块 */
+.tp-scope-tip {
+  margin-top: 8px; padding: 8px 10px; border-radius: var(--radius-sm);
+  background: #f4fafd; border: 1px dashed #bcd9ea;
+  font-size: 12px; line-height: 1.6; color: var(--ink-2);
+}
+.tp-scope-tip[hidden] { display: none; }
+.tp-tip-text { display: block; }
+.tp-tip-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 6px; }
+.tp-tip-label { font-size: 11px; color: var(--ink-soft); }
+.tp-hint-btn {
+  font-family: var(--round); font-size: 11.5px;
+  padding: 4px 10px; border-radius: 999px; cursor: pointer;
+  border: 1px solid #bcd9ea; background: #fff; color: var(--ink);
+}
+.tp-hint-btn:active { transform: scale(.96); background: #eaf5fc; }
+
+/* 三步引导 */
+.tp-onboard { max-width: 350px; text-align: center; }
+.tp-onboard-body { padding: 22px 20px 6px; }
+.tp-onboard-icon { font-size: 40px; line-height: 1; margin-bottom: 10px; }
+.tp-onboard-body h2 { margin: 0 0 8px; font-size: 18px; }
+.tp-onboard-body p { margin: 0; font-size: 13.5px; line-height: 1.8; color: var(--ink-2); }
+.tp-onboard-dots { display: flex; justify-content: center; gap: 6px; padding: 10px 0 2px; }
+.tp-onboard-dots i { width: 7px; height: 7px; border-radius: 50%; background: #d7e5ee; }
+.tp-onboard-dots i.on { background: var(--sky); }
+.tp-onboard-actions { padding: 6px 18px 16px; justify-content: center; gap: 8px; }
+.tp-onboard-actions .tp-btn { flex: 0 0 auto; }
 .tp-config-warn { background: #fff5f4; border-color: #ffc9c4; color: var(--bad); }
 .tp-config-note { margin: 8px 0 0; font-size: 12px; line-height: 1.7; color: var(--ink-soft); }
 .tp-hint-line { margin: 8px 0 0; font-size: 12.5px; color: var(--ink-soft); }
@@ -410,8 +439,7 @@ body {
 .tp-lake-casing { fill: #ffffff; stroke: #ffffff; stroke-width: 2.5; stroke-linejoin: round; opacity: .9; }
 .tp-lake { fill: #a9ddf2; stroke: #86c9e5; stroke-width: 1; stroke-linejoin: round; }
 
-.tp-range { opacity: .6; }
-.tp-range path { fill: #dbd0bf; stroke: #bdae99; stroke-width: .9; stroke-linejoin: round; }
+.tp-range { opacity: .6; fill: #dbd0bf; stroke: #bdae99; stroke-width: .9; stroke-linejoin: round; }
 
 .tp-terrain-labels { pointer-events: none; }
 .tp-terrain-label {
@@ -430,7 +458,15 @@ body {
 
 .tp-marks, .tp-marks * { pointer-events: none; }
 .tp-mark { fill: none; stroke-width: 2.6; stroke-linejoin: round; }
-.tp-mark-given { fill: rgba(255,193,58,.46); stroke: var(--gold); stroke-width: 2.8; }
+.tp-mark-given {
+  fill: rgba(255,193,58,.46); stroke: var(--gold); stroke-width: 2.8;
+  /* 出题时闪三下，配合聚光灯把注意力拉过去 */
+  animation: tp-flash 1.05s ease-in-out 3;
+}
+@keyframes tp-flash {
+  0%, 100% { opacity: 1; }
+  45% { opacity: .28; }
+}
 .tp-mark-correct { fill: rgba(63,174,106,.3); stroke: var(--ok); stroke-width: 3; }
 .tp-mark-close { fill: rgba(240,165,42,.3); stroke: var(--warn); stroke-width: 3; }
 .tp-mark-wrong { fill: rgba(242,83,74,.28); stroke: var(--bad); stroke-width: 3; }
@@ -636,7 +672,14 @@ body {
 
   .tp-legend { display: none !important; }
   .tp-map-controls { left: 8px; bottom: 8px; gap: 4px; }
-  .tp-map-controls .tp-icon-btn { width: 28px; height: 28px; font-size: 14px; }
+  .tp-map-controls .tp-icon-btn { width: 32px; height: 32px; font-size: 15px; }
+
+  /* 这条是给指头的：把每个省的描边加宽成「透明」，可点区域往外扩 7px。
+     小图上宁夏、海南、京津沪这些省否则根本点不准。 */
+  .tp-region { stroke: rgba(0, 0, 0, 0); stroke-width: 14; vector-effect: non-scaling-stroke; }
+
+  /* 小图上地貌标注缩到 4px 左右，看不清反而添乱，直接不显示 */
+  .tp-terrain-labels { display: none; }
 
   .tp-panel-head { gap: 6px; }
   .tp-quit-btn { width: 26px; height: 26px; font-size: 12px; }
@@ -710,4 +753,16 @@ body {
   .tp-modal-head h2 { font-size: 16px; }
   .tp-modal-body { padding: 12px 14px 18px; }
   .tp-summary { margin: 10px auto; }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   横屏手机（矮而宽）：改成左右分栏，比上下堆叠多出一倍地图
+   ══════════════════════════════════════════════════════════════ */
+@media (min-width: 600px) and (max-height: 560px) {
+  :root { --block-h: 202px; }
+  .tp-play { flex-direction: row; align-items: stretch; }
+  .tp-map-pane { flex: 1 1 auto; min-width: 0; height: 100%; }
+  .tp-panel { flex: 0 0 clamp(300px, 44%, 440px); }
+  .tp-answer { height: 112px; }
+  .tp-answer-body { height: 92px; }
 }

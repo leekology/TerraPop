@@ -356,24 +356,24 @@
         }));
       });
 
+      // 山脉：同一条山脉的所有山形合成一个 path（284 个元素 → 16 个），
+      // 元素少了 SVG 的绘制和命中测试都轻很多，在低端机上提升明显。
       (terrain.ranges || []).forEach(function (rg) {
         var pts = rg.points.map(project);
         var size = rg.size || 1;
         var stops = walkPolyline(pts, Math.max(5.5, size * 7));
-        var g = U.svgEl("g", { class: "tp-range" });
+        var d = "";
         stops.forEach(function (s, i) {
           var px = -s.dir[1], py = s.dir[0];
           var off = (i % 2 ? 1 : -1) * size * 2.0;
           var x = s.p[0] + px * off, y = s.p[1] + py * off;
           var hw = size * (5.2 + (i % 3) * 0.8);
           var hh = hw * 1.32;
-          g.appendChild(U.svgEl("path", {
-            d: "M" + (x - hw).toFixed(1) + " " + y.toFixed(1) +
+          d += "M" + (x - hw).toFixed(1) + " " + y.toFixed(1) +
                " L" + x.toFixed(1) + " " + (y - hh).toFixed(1) +
-               " L" + (x + hw).toFixed(1) + " " + y.toFixed(1) + " Z"
-          }));
+               " L" + (x + hw).toFixed(1) + " " + y.toFixed(1) + " Z ";
         });
-        gLandformClip.appendChild(g);
+        if (d) gLandformClip.appendChild(U.svgEl("path", { class: "tp-range", d: d.trim() }));
       });
     }
 

@@ -486,18 +486,30 @@ const mapStats = await page.evaluate(() => ({
   givenMark: document.querySelectorAll("#mapHost .tp-mark-given").length,
   halo: document.querySelectorAll("#mapHost .tp-mark-halo").length,
   landforms: document.querySelectorAll("#mapHost .tp-landform").length,
-  ranges: document.querySelectorAll("#mapHost .tp-range path").length,
+  ranges: document.querySelectorAll("#mapHost .tp-range").length,
+  rangePeaks: [...document.querySelectorAll("#mapHost .tp-range")]
+    .reduce((n, path) => n + ((path.getAttribute("d") || "").match(/M/g) || []).length, 0),
   rivers: document.querySelectorAll("#mapHost .tp-river").length,
   lakes: document.querySelectorAll("#mapHost .tp-lake").length,
   labels: [...document.querySelectorAll("#mapHost .tp-terrain-label")].map(e => e.textContent),
-  typeLabels: document.querySelectorAll("#mapHost .tp-tl-type").length
+  typeLabels: document.querySelectorAll("#mapHost .tp-tl-type").length,
+  terrainEls: document.querySelector("#mapHost .tp-landforms").childElementCount
 }));
 check("34 个省级区域", mapStats.regions === 34);
 check("已知位置时亮起聚光灯", mapStats.spotOn);
 check("目标省有高亮描边 + 脉动光环", mapStats.givenMark === 1 && mapStats.halo === 1);
+check("已知位置的高亮带闪动效果（tp-flash ×3）", await page.evaluate(() => {
+  const p = document.querySelector("#mapHost .tp-marks .tp-mark-given");
+  if (!p) return false;
+  const cs = getComputedStyle(p);
+  return cs.animationName === "tp-flash" && cs.animationIterationCount === "3";
+}));
 check("地貌仍然完整（面状 / 山脉 / 河流 / 湖泊）",
-  mapStats.landforms >= 12 && mapStats.ranges >= 40 && mapStats.rivers >= 8 && mapStats.lakes >= 10,
-  `${mapStats.landforms}/${mapStats.ranges}/${mapStats.rivers}/${mapStats.lakes}`);
+  mapStats.landforms >= 12 && mapStats.ranges >= 12 && mapStats.rangePeaks >= 40 &&
+  mapStats.rivers >= 8 && mapStats.lakes >= 10,
+  `${mapStats.landforms} / ${mapStats.ranges} 座山(${mapStats.rangePeaks} 峰) / ${mapStats.rivers} / ${mapStats.lakes}`);
+check("地形元素做了合并（每条山脉一个 path，元素总数 ≤ 120）",
+  mapStats.terrainEls <= 120, `${mapStats.terrainEls} 个元素（合并前约 340）`);
 check("面状地貌只标类型名（高原/盆地/平原/沙漠/丘陵）", mapStats.typeLabels >= 10, String(mapStats.typeLabels));
 const badLabels = mapStats.labels.filter(l => /四川|内蒙古|青藏|云贵|青海|滇|黑龙江|雅鲁藏布|秦岭/.test(l));
 check("图上没有任何会泄露省份的标注", badLabels.length === 0, badLabels.join(","));
@@ -885,6 +897,13 @@ await pickChip("knownChips", "full");
 await page.waitForTimeout(120);
 check("手机端做定位题时，首页会提示缩小范围", await page.isVisible("#scopeTip"),
   await page.textContent("#scopeTip"));
+check("提示里带「一键只玩某个大区」的按钮",
+  (await page.locator("#scopeTip .tp-hint-btn").count()) === 7);
+await page.locator("#scopeTip .tp-hint-btn").first().click();
+await page.waitForTimeout(250);
+check("点一下就把范围收成一个大区", /5/.test(await page.textContent("#homeRegionCount")),
+  await page.textContent("#homeRegionCount"));
+await setScopeAll();
 await page.click("#btnStart");
 await page.waitForTimeout(400);
 const tapTarget = await page.evaluate(() => {
@@ -902,12 +921,64 @@ const tapPt = await page.evaluate(id => {
 await page.touchscreen.tap(tapPt[0], tapPt[1]);
 await page.waitForTimeout(250);
 check("轻点一下就能选省（不会被当成拖动）", (await prevInfo()).isAnswer, (await prevInfo()).verds);
+check("手机上每个省的可点区域被放大（透明描边 14px + non-scaling-stroke）", await page.evaluate(() => {
+  const p = document.querySelector("#mapHost .tp-region-fills .tp-region");
+  const cs = getComputedStyle(p);
+  return parseFloat(cs.strokeWidth) >= 10 && cs.vectorEffect === "non-scaling-stroke";
+}));
 check("答题时地图不再自动放大（定位题要能点全国）", await page.evaluate(() => {
   const t = document.querySelector("#mapHost .tp-viewport").getAttribute("transform");
   const m = /scale\(([\d.]+)\)/.exec(t);
   return !m || parseFloat(m[1]) <= 1.01;
 }));
 await page.screenshot({ path: path.join(shots, "14-mobile-play.png") });
+
+// ── 首次进入的三步引导 ──
+await page.evaluate(() => { try { localStorage.removeItem("terrapop.onboarded.v1"); } catch (e) {} });
+await page.reload({ waitUntil: "load" });
+await page.waitForTimeout(800);
+check("小屏首次进入会自动弹出三步引导", !(await page.isHidden("#onboard")));
+check("引导第一步讲「每题只问一处」", /每题只问一处/.test(await page.textContent("#onboardBody")),
+  await page.textContent("#onboardBody"));
+await page.click("#btnOnboardNext");
+await page.waitForTimeout(120);
+check("第二步讲按住拖动", /按住/.test(await page.textContent("#onboardBody")));
+await page.screenshot({ path: path.join(shots, "14-onboard.png") });
+await page.click("#btnOnboardNext");
+await page.waitForTimeout(120);
+check("第三步讲摘要行", /上一题/.test(await page.textContent("#onboardBody")));
+await page.click("#btnOnboardNext");
+await page.waitForTimeout(320);
+check("走完引导后关闭", await page.isHidden("#onboard"));
+await page.reload({ waitUntil: "load" });
+await page.waitForTimeout(700);
+check("再次进入不会重复弹引导", await page.isHidden("#onboard"));
+
+// ── 横屏手机：左右分栏 ──
+await page.setViewportSize({ width: 844, height: 390 });
+await page.waitForTimeout(420);
+await setScopeAll();
+await pickChip("modeChips", "random");
+await pickChip("knownChips", "location");
+await pickChip("askedChips", "full");
+await pickChip("styleChips", "text");
+await page.click("#btnStart");
+await page.waitForTimeout(500);
+const lr = await page.evaluate(() => {
+  const play = document.querySelector(".tp-play");
+  const map = document.querySelector(".tp-map-pane").getBoundingClientRect();
+  const panel = document.querySelector(".tp-panel").getBoundingClientRect();
+  return {
+    dir: getComputedStyle(play).flexDirection,
+    mapW: Math.round(map.width), mapH: Math.round(map.height),
+    sideBySide: Math.abs(map.top - panel.top) < 10
+  };
+});
+check("横屏手机改成左右分栏", lr.dir === "row" && lr.sideBySide, JSON.stringify(lr));
+check("横屏下地图是宽大于高的主体", lr.mapW > lr.mapH, `${lr.mapW}x${lr.mapH}`);
+check("横屏下也一屏放得下", await page.evaluate(() =>
+  document.documentElement.scrollHeight <= document.documentElement.clientHeight + 2));
+await page.screenshot({ path: path.join(shots, "14-landscape.png") });
 
 // ── 15. 无报错 ───────────────────────────────────────────────
 section("15. 运行期无报错");

@@ -224,6 +224,43 @@
    * 手机上的实际可视高度要跟着输入法走：软键盘弹起时 visualViewport 会变矮，
    * 把 --vvh 写进 CSS，地图（flex:1）就会自己缩，答题区不会被键盘盖住。
    */
+  // ── 首次进入的三步引导（只在紧凑屏出现）────────────────────
+  var ONBOARD_KEY = "terrapop.onboarded.v1";
+  var ONBOARD_STEPS = ["1", "2", "3"];
+  var onboardStep = 0;
+
+  function onboardSeen() {
+    try { return global.localStorage && global.localStorage.getItem(ONBOARD_KEY) === "1"; }
+    catch (e) { return false; }
+  }
+  function markOnboarded() {
+    try { if (global.localStorage) global.localStorage.setItem(ONBOARD_KEY, "1"); } catch (e) {}
+  }
+  function renderOnboard() {
+    var step = ONBOARD_STEPS[onboardStep];
+    U.clear(el.onboardBody);
+    el.onboardBody.appendChild(U.el("div", { class: "tp-onboard-icon", text: t("onboard.step" + step + ".icon") }));
+    el.onboardBody.appendChild(U.el("h2", { id: "onboardTitle", text: t("onboard.step" + step + ".title") }));
+    el.onboardBody.appendChild(U.el("p", { text: t("onboard.step" + step + ".body") }));
+
+    U.clear(el.onboardDots);
+    ONBOARD_STEPS.forEach(function (_, i) {
+      el.onboardDots.appendChild(U.el("i", { class: i === onboardStep ? "on" : "" }));
+    });
+    el.btnOnboardNext.textContent = onboardStep === ONBOARD_STEPS.length - 1
+      ? t("onboard.start") : t("onboard.next");
+    el.btnOnboardSkip.textContent = t("onboard.skip");
+  }
+  function showOnboard() {
+    onboardStep = 0;
+    renderOnboard();
+    showOverlay(el.onboard);
+  }
+  function closeOnboard() {
+    markOnboarded();
+    hideOverlay(el.onboard);
+  }
+
   function trackViewportHeight() {
     var vv = global.visualViewport;
     if (!vv) return;
@@ -356,8 +393,24 @@
       : t("scope.empty");
     el.homeRegionCount.classList.toggle("tp-config-warn", n === 0);
 
-    el.scopeTip.hidden = !(isCompact() && (settings.asked === "location" || settings.asked === "random") && n > 12);
-    el.scopeTip.textContent = t("scope.mobileLocateTip");
+    var showTip = isCompact() && (settings.asked === "location" || settings.asked === "random") && n > 12;
+    el.scopeTip.hidden = !showTip;
+    if (showTip) {
+      U.clear(el.scopeTip);
+      el.scopeTip.appendChild(U.el("span", { class: "tp-tip-text", text: t("scope.mobileLocateTip") }));
+      var tipRow = U.el("div", { class: "tp-tip-actions" });
+      tipRow.appendChild(U.el("span", { class: "tp-tip-label", text: t("scope.oneTap") }));
+      T.groups.forEach(function (g) {
+        var b = U.el("button", { type: "button", class: "tp-hint-btn", text: t("group." + g) });
+        b.addEventListener("click", function () {
+          settings.scopeGroups = [g];
+          persist();
+          buildHome();
+        });
+        tipRow.appendChild(b);
+      });
+      el.scopeTip.appendChild(tipRow);
+    }
 
     el.configSummary.textContent = t("config.summary", {
       known: settings.known === "random" ? t("config.random") : t("dim." + settings.known),
@@ -455,8 +508,8 @@
     renderPrevCard(null);           // 第一题：上方卡片显示玩法说明
     nextQuestion();
 
-    // 手机上拖动地图需要先按住，第一次开局提示一下
-    if (isCompact() && !state.holdHintShown) {
+    // 手机上拖动地图需要先按住；新手引导里已经讲过，所以只在之后再提示一次
+    if (isCompact() && !state.holdHintShown && onboardSeen()) {
       state.holdHintShown = true;
       setTimeout(function () { toast(t("map.holdToPan"), 2600); }, 500);
     }
@@ -1170,7 +1223,8 @@
       "homeRegionCount", "langSelect", "btnSettings", "btnSettingsClose", "settingsOverlay",
       "settingsBody", "btnRestart", "btnHome", "btnQuit", "toast", "summaryBody",
       "confirmOverlay", "confirmBody", "btnConfirmStay", "btnConfirmLeave",
-      "scopeTip", "infoSheet", "infoSheetTitle", "infoSheetBody", "btnInfoSheetClose"
+      "scopeTip", "infoSheet", "infoSheetTitle", "infoSheetBody", "btnInfoSheetClose",
+      "onboard", "onboardBody", "onboardDots", "btnOnboardNext", "btnOnboardSkip"
     ].forEach(function (id) { el[id] = document.getElementById(id); });
   }
 
@@ -1189,6 +1243,11 @@
       if (!el.infoSheetBody.firstChild) return;
       showOverlay(el.infoSheet);
     });
+    el.btnOnboardNext.addEventListener("click", function () {
+      if (onboardStep < ONBOARD_STEPS.length - 1) { onboardStep += 1; renderOnboard(); return; }
+      closeOnboard();
+    });
+    el.btnOnboardSkip.addEventListener("click", closeOnboard);
     el.prevCard.addEventListener("keydown", function (e) {
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); el.prevCard.click(); }
     });
@@ -1199,11 +1258,13 @@
     el.btnHome.addEventListener("click", function () { showScreen("home"); buildHome(); });
 
     document.addEventListener("keydown", function (e) {
-      var overlayOpen = !el.settingsOverlay.hidden || !el.confirmOverlay.hidden || !el.infoSheet.hidden;
+      var overlayOpen = !el.settingsOverlay.hidden || !el.confirmOverlay.hidden ||
+        !el.infoSheet.hidden || !el.onboard.hidden;
       if (overlayOpen) {
         if (e.key === "Escape") {
           if (!el.confirmOverlay.hidden) { dismissConfirm(true); return; }
           if (!el.infoSheet.hidden) { hideOverlay(el.infoSheet); return; }
+          if (!el.onboard.hidden) { closeOnboard(); return; }
           hideOverlay(el.settingsOverlay);
         }
         return;
@@ -1244,6 +1305,11 @@
     buildSettings();
     bind();
     showScreen("home");
+
+    // 小屏首次进入：给一个三步引导（怎么玩 / 按住拖动 / 摘要行）
+    if (isCompact() && !onboardSeen()) {
+      setTimeout(function () { if (isCompact()) showOnboard(); }, 350);
+    }
 
     // 横竖屏切换 / 窗口尺寸变化时，摘要行和内容要重新落位
     var onResize = U.debounce(function () {

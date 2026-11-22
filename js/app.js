@@ -339,10 +339,10 @@
       persist(); buildHome();
     });
     buildChips(el.styleChips, [
-      { value: "text", label: t("style.text") },
       { value: "choice3", label: t("style.choice3") },
       { value: "choice4", label: t("style.choice4") },
       { value: "choice5", label: t("style.choice5") },
+      { value: "text", label: t("style.text") },
       { value: "locate", label: t("style.locate") }
     ], settings.asked === "location" ? "locate" : settings.style, function (v) {
       settings.style = v;
@@ -1116,10 +1116,10 @@
     }
 
     el.settingsBody.appendChild(group("settings.styleDefault", [
-      { value: "text", label: t("style.text") },
       { value: "choice3", label: t("style.choice3") },
       { value: "choice4", label: t("style.choice4") },
-      { value: "choice5", label: t("style.choice5") }
+      { value: "choice5", label: t("style.choice5") },
+      { value: "text", label: t("style.text") }
     ], settings.style === "locate" ? "text" : settings.style, function (v) {
       settings.style = v; persist(); buildSettings(); buildHome();
     }));

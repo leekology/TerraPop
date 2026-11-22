@@ -615,8 +615,7 @@ body {
   .tp-brand-text strong { font-size: 16px; }
   .tp-legend { font-size: 10px; padding: 5px 8px; }
   .tp-ask-text { font-size: 19px; height: 30px; line-height: 30px; }
-  .tp-choices { grid-template-columns: 1fr; grid-auto-rows: 42px; gap: 5px; }
-  .tp-answer-body { overflow-y: auto; }
+  .tp-choices { grid-auto-rows: 36px; gap: 5px; }
 }
 
 /* ── 动效开关 ─────────────────────────────────────────────── */
@@ -715,7 +714,8 @@ body {
   .tp-smart-hint { display: none; }
   .tp-suggest { margin-top: 6px; max-height: 48px; overflow-y: auto; }
   .tp-suggest-item { font-size: 12px; padding: 4px 10px; }
-  .tp-choices { grid-auto-rows: 30px; gap: 5px; }
+  /* 两列固定：5 个选项 = 3 行 × 30 + 2 × 5 = 100px，稳在 108px 的作答区里，不会出滚动条 */
+  .tp-choices { grid-template-columns: 1fr 1fr; grid-auto-rows: 30px; gap: 5px; }
   .tp-choice { height: 30px; font-size: 13px; padding: 0 8px; gap: 6px; border-radius: 9px; }
   .tp-choice-key { flex: 0 0 16px; height: 16px; font-size: 9.5px; border-radius: 5px; }
   .tp-locate-box { height: 108px; font-size: 12.5px; gap: 4px; }
@@ -759,10 +759,11 @@ body {
    横屏手机（矮而宽）：改成左右分栏，比上下堆叠多出一倍地图
    ══════════════════════════════════════════════════════════════ */
 @media (min-width: 600px) and (max-height: 560px) {
-  :root { --block-h: 202px; }
+  :root { --block-h: 216px; --prev-h: 34px; }
   .tp-play { flex-direction: row; align-items: stretch; }
   .tp-map-pane { flex: 1 1 auto; min-width: 0; height: 100%; }
-  .tp-panel { flex: 0 0 clamp(300px, 44%, 440px); }
-  .tp-answer { height: 112px; }
-  .tp-answer-body { height: 92px; }
+  .tp-panel { flex: 0 0 clamp(300px, 44%, 440px); padding: 8px; }
+  /* 5 个选项 = 3 行 × 30 + 2 × 5 = 100px，所以作答区留 106px 才不会出滚动条 */
+  .tp-answer { height: 126px; }
+  .tp-answer-body { height: 106px; }
 }

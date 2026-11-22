@@ -120,6 +120,10 @@ async function setScopeAll() {
 
 // ── 1. 首页 ──────────────────────────────────────────────────
 section("1. 首页：玩法矩阵配置");
+check("作答方式顺序：三选一 / 四选一 / 五选一 / 填空 / 定位",
+  (await page.$$eval("#styleChips .tp-chip span", els => els.map(e => e.textContent))).join(",")
+    === "三选一,四选一,五选一,填空,定位",
+  (await page.$$eval("#styleChips .tp-chip span", els => els.map(e => e.textContent))).join(","));
 check("已知 / 要猜 / 作答方式各 5 个选项",
   (await page.locator("#knownChips .tp-chip").count()) === 5 &&
   (await page.locator("#askedChips .tp-chip").count()) === 5 &&
@@ -737,9 +741,28 @@ await page.waitForTimeout(200);
 check("极速模式答完继续出题、不会立刻结束",
   (await head()) !== headT && !(await page.isHidden("#screenPlay")));
 
+// 12b2 五选一：桌面端选项不该出滚动条
+await leaveGame();
+await pickChip("knownChips", "short");
+await pickChip("askedChips", "capital");
+await pickChip("styleChips", "choice5");
+await page.click("#btnStart");
+await page.waitForTimeout(300);
+check("五选一渲染出 5 个选项", (await page.locator("#answerArea .tp-choice").count()) === 5);
+check("桌面端选项区没有滚动条", await page.evaluate(() => {
+  const b = document.querySelector("#answerArea .tp-answer-body");
+  return b.scrollHeight <= b.clientHeight + 1;
+}), await page.evaluate(() => {
+  const b = document.querySelector("#answerArea .tp-answer-body");
+  return `${b.scrollHeight} / ${b.clientHeight}`;
+}));
+
 // 12c 全答对为止（缩到华北的 2 个省）
 await leaveGame();
 await pickChip("modeChips", "perfect");
+await pickChip("knownChips", "short");
+await pickChip("askedChips", "full");
+await pickChip("styleChips", "text");
 await setScope(["north"], ["province"]);
 await page.click("#btnStart");
 await page.waitForTimeout(300);
@@ -933,6 +956,25 @@ check("答题时地图不再自动放大（定位题要能点全国）", await p
 }));
 await page.screenshot({ path: path.join(shots, "14-mobile-play.png") });
 
+// 手机端五选一：不能出现纵向滚动条
+await leaveGame();
+await pickChip("knownChips", "short");
+await pickChip("askedChips", "capital");
+await pickChip("styleChips", "choice5");
+await page.click("#btnStart");
+await page.waitForTimeout(350);
+check("手机端五选一渲染出 5 个选项", (await page.locator("#answerArea .tp-choice").count()) === 5);
+const mobCls = await page.evaluate(() => {
+  const g = document.querySelector("#answerArea .tp-choices");
+  const b = document.querySelector("#answerArea .tp-answer-body");
+  return {
+    cols: getComputedStyle(g).gridTemplateColumns.split(" ").length,
+    overflow: b.scrollHeight - b.clientHeight
+  };
+});
+check("手机端选项是两列而不是单列", mobCls.cols === 2, `${mobCls.cols} 列`);
+check("手机端选项区没有滚动条", mobCls.overflow <= 1, `溢出 ${mobCls.overflow}px`);
+
 // ── 首次进入的三步引导 ──
 await page.evaluate(() => { try { localStorage.removeItem("terrapop.onboarded.v1"); } catch (e) {} });
 await page.reload({ waitUntil: "load" });
@@ -979,6 +1021,24 @@ check("横屏下地图是宽大于高的主体", lr.mapW > lr.mapH, `${lr.mapW}x
 check("横屏下也一屏放得下", await page.evaluate(() =>
   document.documentElement.scrollHeight <= document.documentElement.clientHeight + 2));
 await page.screenshot({ path: path.join(shots, "14-landscape.png") });
+
+// 横屏下五选一也不能出滚动条
+await leaveGame();
+await pickChip("knownChips", "short");
+await pickChip("askedChips", "capital");
+await pickChip("styleChips", "choice5");
+await page.click("#btnStart");
+await page.waitForTimeout(350);
+check("横屏五选一渲染出 5 个选项", (await page.locator("#answerArea .tp-choice").count()) === 5);
+check("横屏选项区没有滚动条", await page.evaluate(() => {
+  const b = document.querySelector("#answerArea .tp-answer-body");
+  return b.scrollHeight <= b.clientHeight + 1;
+}), await page.evaluate(() => {
+  const b = document.querySelector("#answerArea .tp-answer-body");
+  return `${b.scrollHeight} / ${b.clientHeight}`;
+}));
+check("横屏下一屏仍然放得下", await page.evaluate(() =>
+  document.documentElement.scrollHeight <= document.documentElement.clientHeight + 2));
 
 // ── 15. 无报错 ───────────────────────────────────────────────
 section("15. 运行期无报错");

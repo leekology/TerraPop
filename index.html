@@ -52,14 +52,13 @@
         <p class="tp-tagline" data-i18n="app.tagline"></p>
       </div>
 
-      <div class="tp-card">
-        <h2 class="tp-card-title" data-i18n="mode.title">模式</h2>
-        <div class="tp-chips" id="modeChips"></div>
-        <p class="tp-mode-desc" id="modeDesc"></p>
-      </div>
-
-      <div class="tp-card">
+      <div class="tp-card tp-card-play">
         <h2 class="tp-card-title" data-i18n="config.matrix">玩法组合</h2>
+        <div class="tp-config-row">
+          <span class="tp-config-key" data-i18n="mode.title">模式</span>
+          <div class="tp-chips" id="modeChips"></div>
+        </div>
+        <p class="tp-mode-desc" id="modeDesc"></p>
         <div class="tp-config-row">
           <span class="tp-config-key" data-i18n="config.known">已知</span>
           <div class="tp-chips" id="knownChips" role="radiogroup"></div>
@@ -73,10 +72,9 @@
           <div class="tp-chips" id="styleChips" role="radiogroup"></div>
         </div>
         <p class="tp-config-summary" id="configSummary"></p>
-        <p class="tp-config-note" data-i18n="config.note"></p>
       </div>
 
-      <div class="tp-card">
+      <div class="tp-card tp-card-scope">
         <h2 class="tp-card-title" data-i18n="scope.title">范围</h2>
         <div class="tp-config-row">
           <span class="tp-config-key" data-i18n="scope.groups">大区</span>
@@ -91,13 +89,9 @@
         <div class="tp-scope-tip" id="scopeTip" hidden></div>
       </div>
 
-      <div class="tp-card tp-card-plain">
-        <h2 class="tp-card-title" data-i18n="home.howto.title">怎么玩</h2>
-        <p class="tp-howto" data-i18n="home.howto.body"></p>
-      </div>
-
       <div class="tp-home-cta">
         <button type="button" class="tp-btn tp-btn-primary tp-btn-lg" id="btnStart" data-i18n="home.startCta">开始挑战</button>
+        <button type="button" class="tp-btn tp-btn-ghost tp-btn-lg" id="btnHowto" data-i18n="home.howto.title">怎么玩</button>
       </div>
     </div>
   </section>

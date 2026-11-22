@@ -145,6 +145,24 @@ check("一个大区都不选时提示为空且不能开局",
   !(await page.isEnabled("#btnStart")), await page.textContent("#homeRegionCount"));
 await setScopeAll();
 check("恢复全选后又能开局", await page.isEnabled("#btnStart"));
+
+// 首页结构：2 张卡 + 宽屏两列 + 怎么玩收成按钮
+check("首页只有 2 张卡片", (await page.locator("#screenHome .tp-card").count()) === 2,
+  String(await page.locator("#screenHome .tp-card").count()));
+check("宽屏下两张卡片并排（把横向空间用起来）", await page.evaluate(() => {
+  const h = document.querySelector(".tp-home");
+  const cards = [...document.querySelectorAll("#screenHome .tp-card")];
+  if (getComputedStyle(h).display !== "grid" || cards.length < 2) return false;
+  return Math.abs(cards[0].getBoundingClientRect().top - cards[1].getBoundingClientRect().top) < 8;
+}));
+check("「怎么玩」收成了一个按钮", await page.isVisible("#btnHowto"));
+await page.click("#btnHowto");
+await page.waitForSelector("#infoSheet:not([hidden])");
+await page.waitForTimeout(220);
+check("点开怎么玩能看到完整说明", /系统给出一个信息/.test(await page.textContent("#infoSheetBody")),
+  (await page.textContent("#infoSheetBody")).slice(0, 30));
+await page.click("#btnInfoSheetClose");
+await page.waitForSelector("#infoSheet", { state: "hidden" });
 await page.screenshot({ path: path.join(shots, "01-home.png") });
 
 // ── 1b. 左上角返回：进行中先确认 ─────────────────────────────
@@ -243,6 +261,15 @@ if (m0.unique) {
   }, expectName);
   check("点候选即提交并立刻换题", (await head()) !== beforeHead);
 }
+// 地图节拍：答案标记只停一瞬，不能赖在屏幕上（早期是 1900ms，明显发卡）
+const beat0 = Date.now();
+await page.waitForFunction(() => {
+  const m = document.querySelector("#mapHost .tp-marks");
+  return !!m && !m.querySelector(".tp-mark-correct") && !m.querySelector(".tp-mark-wrong");
+}, null, { timeout: 5000 });
+const beatMs = Date.now() - beat0;
+check("地图上的答案标记很快就切走（≤ 900ms）", beatMs <= 900, `切走用了 ${beatMs}ms`);
+
 const afterHead = await head();
 check("没有出现任何弹窗", await page.isHidden("#settingsOverlay"));
 check("作答区已经换成新题的控件，不需要点「下一题」",
@@ -838,8 +865,10 @@ const homeFits = await page.evaluate(() => ({
 }));
 check("首页在手机上一屏放得下（不需要滚动）", homeFits.scroll <= homeFits.client + 2,
   `${homeFits.scroll} / ${homeFits.client}`);
-check("手机上去掉了「怎么玩」大段说明卡",
-  await page.evaluate(() => getComputedStyle(document.querySelector(".tp-card-plain")).display === "none"));
+check("手机上首页也是 2 张卡片", (await page.locator("#screenHome .tp-card").count()) === 2,
+  String(await page.locator("#screenHome .tp-card").count()));
+check("手机上卡片是单列堆叠", await page.evaluate(() =>
+  getComputedStyle(document.querySelector(".tp-home")).display !== "grid"));
 
 await page.click("#btnStart");
 await page.waitForTimeout(500);

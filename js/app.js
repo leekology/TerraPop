@@ -24,9 +24,11 @@
 
   var TIMED_MS = 60000;
 
-  // 上一题的地图画面多留一会儿：下一题如果也要看图，就少留一点
-  var MAP_BEAT_IDLE = 1900;
-  var MAP_BEAT_NEEDED = 900;
+  // 上一题的答案标记在地图上多停留一会儿。
+  // 面板是零延迟切题的，所以这个"节拍"只要够看清就行，别拖：
+  // 下一题如果还要点地图（定位题），留得更短，否则点不动会显得卡。
+  var MAP_BEAT_IDLE = 520;
+  var MAP_BEAT_NEEDED = 240;
 
   // ── 设置 ─────────────────────────────────────────────────────
 
@@ -622,7 +624,9 @@
 
     // 地图：默认先锁住；上一题的答案画面留一小会儿再切到本题
     state.mapView.setLocked(true);
-    var beat = state.beatPending ? (q.asked === "location" ? MAP_BEAT_NEEDED : MAP_BEAT_IDLE) : 0;
+    // 只要这一题的地图上有信息（已知位置 / 要点位置），就尽快切过去
+    var needsMap = q.asked === "location" || q.known === "location";
+    var beat = state.beatPending ? (needsMap ? MAP_BEAT_NEEDED : MAP_BEAT_IDLE) : 0;
     state.beatPending = false;
     applyMapState(q, beat);
 
@@ -1224,7 +1228,7 @@
       "settingsBody", "btnRestart", "btnHome", "btnQuit", "toast", "summaryBody",
       "confirmOverlay", "confirmBody", "btnConfirmStay", "btnConfirmLeave",
       "scopeTip", "infoSheet", "infoSheetTitle", "infoSheetBody", "btnInfoSheetClose",
-      "onboard", "onboardBody", "onboardDots", "btnOnboardNext", "btnOnboardSkip"
+      "onboard", "onboardBody", "onboardDots", "btnOnboardNext", "btnOnboardSkip", "btnHowto"
     ].forEach(function (id) { el[id] = document.getElementById(id); });
   }
 
@@ -1241,6 +1245,13 @@
     el.prevCard.addEventListener("click", function () {
       if (!isCompact()) return;
       if (!el.infoSheetBody.firstChild) return;
+      showOverlay(el.infoSheet);
+    });
+    el.btnHowto.addEventListener("click", function () {
+      U.clear(el.infoSheetBody);
+      el.infoSheetBody.appendChild(U.el("h3", { class: "tp-prev-title", text: t("home.howto.title") }));
+      el.infoSheetBody.appendChild(U.el("p", { class: "tp-prev-body", text: t("home.howto.body") }));
+      el.infoSheetTitle.textContent = t("home.howto.title");
       showOverlay(el.infoSheet);
     });
     el.btnOnboardNext.addEventListener("click", function () {

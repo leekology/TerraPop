@@ -39,6 +39,7 @@ window.TERRAPOP.locales["zh-Hans"] = {
   "scope.selectAllGroups": "大区全选",
   "scope.clearGroups": "大区清空",
   "scope.empty": "当前选择里没有可出的省份，先勾几个大区。",
+  "scope.mobileLocateTip": "手机上做定位题，地图很小——建议只勾一个大区，点位更好按。",
 
   "group.north": "华北",
   "group.northeast": "东北",
@@ -58,9 +59,6 @@ window.TERRAPOP.locales["zh-Hans"] = {
   "style.choice4": "四选一",
   "style.choice5": "五选一",
   "style.locate": "定位",
-  "style.easy": "简单",
-  "style.normal": "普通",
-  "style.hard": "困难",
 
   "term.capital": "省会",
   "term.seat": "首府",
@@ -74,6 +72,7 @@ window.TERRAPOP.locales["zh-Hans"] = {
   // ── 题面 / 作答 ──
   "question.counter": "第 {n} 题",
   "question.prompt": "请说出它的「{asked}」",
+  "question.promptPrefix": "请说出它的",
   "question.askLocation": "点地图选答案",
   "question.knownLocation": "已在地图上圈出",
   "question.hintFirst": "首字提示：{v}",
@@ -95,6 +94,8 @@ window.TERRAPOP.locales["zh-Hans"] = {
   "prev.yourAnswer": "你答的是",
   "prev.unknown": "未作答",
   "prev.requeued": "这题答错了，稍后会再出现一次",
+  "prev.requeuedShort": "稍后再来",
+  "prev.tapForMore": "详情 ›",
 
   "action.submit": "确定",
   "action.skip": "跳过",
@@ -176,6 +177,7 @@ window.TERRAPOP.locales["zh-Hans"] = {
   "home.howto.body": "系统给出一个信息（全称 / 简称 / 省会 / 位置），你只需答出另一个。位置题直接点地图，其余题可以填也可以选；填的时候支持拼音和拼音首字母，输入到没有歧义就自动判对。答完立刻揭晓全部信息，位置固定、不打断，连击越高分越高。",
   "home.regionCount": "本期题目覆盖 {n} 个省级行政区",
 
+  "map.holdToPan": "地图：按住 0.3 秒再拖，才能平移",
   "map.insetSouthChinaSea": "南海诸岛",
   "map.insetHongKongMacao": "香港 · 澳门",
 

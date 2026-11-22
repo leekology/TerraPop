@@ -44,7 +44,7 @@ function section(t) { console.log(`\n${t}`); }
 
 const errors = [];
 const browser = await chromium.launch(Object.assign({ headless: true }, LAUNCH));
-const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
+const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, hasTouch: true });
 const page = await context.newPage();
 
 page.on("console", m => { if (m.type() === "error") errors.push("console: " + m.text()); });
@@ -193,9 +193,14 @@ check("上方卡片里是说明文字而不是答案", (await page.textContent("
 check("当前题给出已知信息", (await page.textContent("#knownChip")).includes("已在地图上圈出"));
 check("题面就是当前要答的维度", (await page.textContent("#askText")).includes("全称"));
 check("作答区就是填空控件", (await page.locator("#answerArea .tp-answer-input").count()) === 1);
-const askSize = await page.$eval("#askText", el => parseFloat(getComputedStyle(el).fontSize));
+const askSizes = await page.evaluate(() => ({
+  strong: parseFloat(getComputedStyle(document.querySelector("#askText .tp-ask-strong")).fontSize),
+  fixed: parseFloat(getComputedStyle(document.querySelector("#askText .tp-ask-fixed")).fontSize)
+}));
 const prevH = (await page.locator("#prevCard").boundingBox()).height;
-check("题面字号够大、够显眼", askSize >= 20, askSize + "px");
+check("要答的那一项是大字、够显眼", askSizes.strong >= 22, askSizes.strong + "px");
+check("提问的固定句式是小字", askSizes.fixed <= 14 && askSizes.fixed < askSizes.strong,
+  `${askSizes.fixed}px vs ${askSizes.strong}px`);
 check("上一题卡片被压矮，不抢戏", prevH <= 264, Math.round(prevH) + "px");
 await page.screenshot({ path: path.join(shots, "02-play.png") });
 
@@ -780,24 +785,129 @@ check("结算有 6 项", cells.length === 6, cells.join(" | "));
 check("最后一项是总耗时且带单位", /总耗时|Total time/.test(cells[5]) && /秒|s$|s\b/.test(cells[5]), cells[5]);
 await page.screenshot({ path: path.join(shots, "12-summary.png") });
 
-// ── 14. 移动端 ───────────────────────────────────────────────
-section("14. 移动端布局");
+// ── 14. 移动端（紧凑模式：不滚动 / 地图自适应 / 一行摘要）─────
+section("14. 移动端紧凑模式");
 await page.click("#btnHome");
 await page.waitForTimeout(150);
 await page.setViewportSize({ width: 390, height: 844 });
-await page.waitForTimeout(250);
+await page.waitForTimeout(350);
 await setScopeAll();
+await pickChip("modeChips", "random");
 await pickChip("knownChips", "location");
 await pickChip("askedChips", "full");
 await pickChip("styleChips", "text");
+
+const homeFits = await page.evaluate(() => ({
+  scroll: document.querySelector("#screenHome").scrollHeight,
+  client: document.querySelector("#screenHome").clientHeight
+}));
+check("首页在手机上一屏放得下（不需要滚动）", homeFits.scroll <= homeFits.client + 2,
+  `${homeFits.scroll} / ${homeFits.client}`);
+check("手机上去掉了「怎么玩」大段说明卡",
+  await page.evaluate(() => getComputedStyle(document.querySelector(".tp-card-plain")).display === "none"));
+
 await page.click("#btnStart");
-await page.waitForTimeout(350);
+await page.waitForTimeout(500);
+
+const noScroll = await page.evaluate(() => ({
+  docScroll: document.documentElement.scrollHeight,
+  docClient: document.documentElement.clientHeight,
+  bodyScroll: document.body.scrollHeight,
+  bodyClient: document.body.clientHeight
+}));
+check("答题时整页不滚动", noScroll.docScroll <= noScroll.docClient + 2 && noScroll.bodyScroll <= noScroll.bodyClient + 2,
+  JSON.stringify(noScroll));
+check("地图在手机上隐藏图例，把空间让出来",
+  await page.evaluate(() => getComputedStyle(document.getElementById("mapLegend")).display === "none"));
+
 const mapBox = await page.locator(".tp-map-pane").boundingBox();
 const panelBox = await page.locator(".tp-panel").boundingBox();
-check("地图与侧栏在窄屏下纵向堆叠", panelBox.y >= mapBox.y + mapBox.height - 2,
+check("地图在上、面板在下", panelBox.y >= mapBox.y + mapBox.height - 2,
   `map ${Math.round(mapBox.y)}+${Math.round(mapBox.height)} → panel ${Math.round(panelBox.y)}`);
-check("窄屏下作答区仍然可用", (await answerBox()).height > 100);
-await page.screenshot({ path: path.join(shots, "13-mobile.png") });
+
+const strip = await page.evaluate(() => {
+  const el = document.getElementById("prevCard");
+  return { strip: el.classList.contains("tp-prev-strip"), h: el.getBoundingClientRect().height, text: el.textContent.trim() };
+});
+check("上一题只留一行摘要（不是大卡片）", strip.strip && strip.h <= 44, `${Math.round(strip.h)}px`);
+
+// 已知位置：地图应当自动局部放大
+const zoomed = await page.evaluate(() => {
+  const t = document.querySelector("#mapHost .tp-viewport").getAttribute("transform");
+  const m = /scale\(([\d.]+)\)/.exec(t);
+  return m ? parseFloat(m[1]) : 1;
+});
+check("手机上已知位置时地图自动局部放大", zoomed > 1.5, `scale ${zoomed}`);
+
+// 模拟输入法弹起：可视高度变矮，答题区必须还在屏幕内
+await page.locator("#answerArea .tp-answer-input").focus();
+await page.setViewportSize({ width: 390, height: 520 });
+await page.waitForTimeout(400);
+const kb = await page.evaluate(() => {
+  const a = document.getElementById("answerArea").getBoundingClientRect();
+  const m = document.querySelector(".tp-map-pane").getBoundingClientRect();
+  return { answerBottom: Math.round(a.bottom), vh: window.innerHeight, mapH: Math.round(m.height) };
+});
+check("模拟输入法弹起后，作答区仍在可视范围内", kb.answerBottom <= kb.vh,
+  `作答区底 ${kb.answerBottom} ≤ ${kb.vh}`);
+check("模拟输入法弹起后，地图会自动缩小让位", kb.mapH < 200, `地图高 ${kb.mapH}`);
+await page.screenshot({ path: path.join(shots, "14-mobile-keyboard.png") });
+
+await page.setViewportSize({ width: 390, height: 844 });
+await page.waitForTimeout(300);
+
+// 先答一题，让摘要行有内容
+const mAnswer = await page.evaluate(() => {
+  const d = document.querySelector("#mapHost .tp-marks .tp-mark").getAttribute("d");
+  return TERRAPOP.maps.cn.regions.find(x => x.d === d).id;
+});
+const mFull = await page.evaluate(id => TERRAPOP.countries.cn.regions.find(r => r.id === id).fullNames["zh-Hans"], mAnswer);
+await page.locator("#answerArea .tp-answer-input").fill(mFull);
+await page.waitForTimeout(150);
+if ((await page.locator("#answerArea .tp-answer-input").count())) await page.keyboard.press("Enter");
+await page.waitForTimeout(300);
+
+// 点摘要行 → 底部抽屉里看完整信息与百科
+await page.locator("#prevCard").click();
+await page.waitForSelector("#infoSheet:not([hidden])");
+await page.waitForTimeout(250);
+check("点摘要在底部抽屉里展开完整信息", (await page.locator("#infoSheetBody .tp-prev-cell").count()) === 4);
+check("抽屉里有记忆点 / 趣味知识 / 小百科", (await page.locator("#infoSheetBody .tp-wiki-section").count()) === 3);
+await page.screenshot({ path: path.join(shots, "14-mobile-sheet.png") });
+await page.click("#btnInfoSheetClose");
+await page.waitForSelector("#infoSheet", { state: "hidden" });
+check("抽屉可关闭", await page.isHidden("#infoSheet"));
+
+// 触屏：轻点选省（不该被判成拖动）
+await leaveGame();
+await pickChip("askedChips", "location");
+await pickChip("knownChips", "full");
+await page.waitForTimeout(120);
+check("手机端做定位题时，首页会提示缩小范围", await page.isVisible("#scopeTip"),
+  await page.textContent("#scopeTip"));
+await page.click("#btnStart");
+await page.waitForTimeout(400);
+const tapTarget = await page.evaluate(() => {
+  const t = document.querySelector("#knownChip").textContent;
+  const c = TERRAPOP.countries.cn.regions.find(r => t.includes(r.fullNames["zh-Hans"]) || t.includes(r.names["zh-Hans"]));
+  return c ? c.id : null;
+});
+const tapPt = await page.evaluate(id => {
+  const p = document.getElementById("tp-r-" + id);
+  const c = TERRAPOP.maps.cn.regions.find(r => r.id === id).center;
+  const m = p.getScreenCTM();
+  const q = new DOMPoint(c[0], c[1]).matrixTransform(m);
+  return [q.x, q.y];
+}, tapTarget);
+await page.touchscreen.tap(tapPt[0], tapPt[1]);
+await page.waitForTimeout(250);
+check("轻点一下就能选省（不会被当成拖动）", (await prevInfo()).isAnswer, (await prevInfo()).verds);
+check("答题时地图不再自动放大（定位题要能点全国）", await page.evaluate(() => {
+  const t = document.querySelector("#mapHost .tp-viewport").getAttribute("transform");
+  const m = /scale\(([\d.]+)\)/.exec(t);
+  return !m || parseFloat(m[1]) <= 1.01;
+}));
+await page.screenshot({ path: path.join(shots, "14-mobile-play.png") });
 
 // ── 15. 无报错 ───────────────────────────────────────────────
 section("15. 运行期无报错");

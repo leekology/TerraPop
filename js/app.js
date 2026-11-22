@@ -76,9 +76,11 @@
     globalDeadline: 0,
     timedMode: false,
     mapGen: 0,
+    mapFocusedId: null,
     beatPending: false,
     startedAt: 0,
-    timerLeft: 0
+    timerLeft: 0,
+    holdHintShown: false
   };
 
   var el = {};
@@ -212,6 +214,27 @@
     return DIMS.filter(function (d) { return d !== dim; })[0];
   }
 
+  // ── 紧凑（手机）模式 ─────────────────────────────────────────
+  var COMPACT_MQ = "(max-width: 860px), (max-height: 560px)";
+  function isCompact() {
+    return !!(global.matchMedia && global.matchMedia(COMPACT_MQ).matches);
+  }
+
+  /**
+   * 手机上的实际可视高度要跟着输入法走：软键盘弹起时 visualViewport 会变矮，
+   * 把 --vvh 写进 CSS，地图（flex:1）就会自己缩，答题区不会被键盘盖住。
+   */
+  function trackViewportHeight() {
+    var vv = global.visualViewport;
+    if (!vv) return;
+    var apply = function () {
+      document.documentElement.style.setProperty("--vvh", Math.round(vv.height) + "px");
+    };
+    vv.addEventListener("resize", apply);
+    vv.addEventListener("scroll", apply);
+    apply();
+  }
+
   // ── chip 组 ──────────────────────────────────────────────────
 
   /** 单选 chip（radio 语义） */
@@ -280,9 +303,9 @@
     });
     buildChips(el.styleChips, [
       { value: "text", label: t("style.text") },
-      { value: "choice3", label: t("style.choice3"), sub: t("style.easy") },
-      { value: "choice4", label: t("style.choice4"), sub: t("style.normal") },
-      { value: "choice5", label: t("style.choice5"), sub: t("style.hard") },
+      { value: "choice3", label: t("style.choice3") },
+      { value: "choice4", label: t("style.choice4") },
+      { value: "choice5", label: t("style.choice5") },
       { value: "locate", label: t("style.locate") }
     ], settings.asked === "location" ? "locate" : settings.style, function (v) {
       settings.style = v;
@@ -332,6 +355,9 @@
       ? t("home.regionCount", { n: n })
       : t("scope.empty");
     el.homeRegionCount.classList.toggle("tp-config-warn", n === 0);
+
+    el.scopeTip.hidden = !(isCompact() && (settings.asked === "location" || settings.asked === "random") && n > 12);
+    el.scopeTip.textContent = t("scope.mobileLocateTip");
 
     el.configSummary.textContent = t("config.summary", {
       known: settings.known === "random" ? t("config.random") : t("dim." + settings.known),
@@ -428,6 +454,12 @@
     updateHud();
     renderPrevCard(null);           // 第一题：上方卡片显示玩法说明
     nextQuestion();
+
+    // 手机上拖动地图需要先按住，第一次开局提示一下
+    if (isCompact() && !state.holdHintShown) {
+      state.holdHintShown = true;
+      setTimeout(function () { toast(t("map.holdToPan"), 2600); }, 500);
+    }
   }
 
   function showScreen(name) {
@@ -557,7 +589,14 @@
       state.mapView.clearMarks();
       state.mapView.setShowCapitals(settings.hintCapital && q.asked !== "location");
       state.mapView.setLocked(q.asked !== "location");
-      if (q.known === "location") state.mapView.highlight(q.region.id, "given");
+      if (q.known === "location") {
+        state.mapView.highlight(q.region.id, "given");
+        // 手机地图小，圈出来的省得放大才看得清
+        if (isCompact()) { state.mapView.focusRegion(q.region.id, 2.9); state.mapFocusedId = q.region.id; }
+      } else if (state.mapFocusedId && isCompact()) {
+        state.mapView.resetView();
+        state.mapFocusedId = null;
+      }
     };
     if (delay > 0) setTimeout(run, delay);
     else run();
@@ -570,9 +609,14 @@
     el.knownChip.appendChild(markLang(U.el("b", { text: knownText }), knownText));
     if (q.known === "capital") el.knownChip.appendChild(U.el("small", { text: T.game.termOf(q.region) }));
 
-    el.askText.textContent = q.asked === "location"
-      ? t("question.askLocation")
-      : t("question.prompt", { asked: t("dim." + q.asked) });
+    // 题面：固定句式用小字，要答的那一项用大字，一眼就知道在问什么
+    U.clear(el.askText);
+    if (q.asked === "location") {
+      el.askText.appendChild(U.el("span", { class: "tp-ask-strong", text: t("question.askLocation") }));
+    } else {
+      el.askText.appendChild(U.el("span", { class: "tp-ask-fixed", text: t("question.promptPrefix") }));
+      el.askText.appendChild(U.el("span", { class: "tp-ask-strong", text: t("dim." + q.asked) }));
+    }
 
     renderAnswerArea(q);
   }
@@ -775,20 +819,43 @@
 
   // ── 上一题卡片 ───────────────────────────────────────────────
 
-  function renderPrevCard(result) {
-    U.clear(el.prevCard);
+  /** 手机上只留一行：判对判错 + 省份 + 「详情 ›」 */
+  function buildPrevStrip(result, cls) {
+    var strip = U.el("div", { class: "tp-strip" });
     if (!result) {
-      el.prevCard.classList.remove("tp-prev-answer", "tp-prev-correct", "tp-prev-close", "tp-prev-wrong");
-      el.prevCard.appendChild(U.el("h3", { class: "tp-prev-title", text: t("prev.explainTitle") }));
-      el.prevCard.appendChild(U.el("p", { class: "tp-prev-body", text: t("prev.explainBody") }));
+      strip.appendChild(U.el("b", { text: t("prev.explainTitle") }));
+    } else {
+      strip.appendChild(U.el("i", {
+        class: "tp-mark-icon " + (cls === "correct" ? "tp-ok" : cls === "close" ? "tp-close-icon" : "tp-bad"),
+        text: cls === "correct" ? "✓" : cls === "close" ? "≈" : "✗"
+      }));
+      var name = localePick(result.region.fullNames, settings.locale);
+      strip.appendChild(markLang(U.el("b", { text: name }), name));
+      if (result.requeued) {
+        strip.appendChild(U.el("i", { class: "tp-strip-flag", text: "↻ " + t("prev.requeuedShort") }));
+      }
+    }
+    strip.appendChild(U.el("span", { class: "tp-strip-more", text: t("prev.tapForMore") }));
+    return strip;
+  }
+
+  function renderPrevCard(result) {
+    var content = U.el("div", { class: "tp-prev-content" });
+    el.prevCard.className = "tp-prev";
+    U.clear(el.prevCard);
+    U.clear(el.infoSheetBody);
+
+    if (!result) {
+      content.appendChild(U.el("h3", { class: "tp-prev-title", text: t("prev.explainTitle") }));
+      content.appendChild(U.el("p", { class: "tp-prev-body", text: t("prev.explainBody") }));
+      el.infoSheetTitle.textContent = t("prev.explainTitle");
+      placePrevCard(content, buildPrevStrip(null));
       return;
     }
 
     var region = result.region;
     var cls = result.correct ? "correct" : result.close ? "close" : "wrong";
-    el.prevCard.classList.add("tp-prev-answer");
-    el.prevCard.classList.remove("tp-prev-correct", "tp-prev-close", "tp-prev-wrong");
-    el.prevCard.classList.add("tp-prev-" + cls);
+    el.prevCard.classList.add("tp-prev-answer", "tp-prev-" + cls);
 
     var head = U.el("div", { class: "tp-prev-head" });
     head.appendChild(U.el("span", { class: "tp-verdict tp-verdict-" + cls, text: t("feedback." + cls) }));
@@ -798,10 +865,10 @@
       class: "tp-prev-your",
       text: t("prev.yourAnswer") + "：" + (result.given || t("prev.unknown"))
     }));
-    el.prevCard.appendChild(head);
+    content.appendChild(head);
 
     if (result.requeued) {
-      el.prevCard.appendChild(U.el("p", { class: "tp-prev-requeue", text: t("prev.requeued") }));
+      content.appendChild(U.el("p", { class: "tp-prev-requeue", text: t("prev.requeued") }));
     }
 
     var info = U.el("div", { class: "tp-prev-info" });
@@ -824,11 +891,25 @@
       }
       info.appendChild(cell);
     });
-    el.prevCard.appendChild(info);
+    content.appendChild(info);
 
     var v = wikiOf(region.id);
-    if (v) el.prevCard.appendChild(buildWikiBlock(v));
-    else el.prevCard.appendChild(U.el("p", { class: "tp-wiki-missing", text: t("reveal.wikiMissing") }));
+    if (v) content.appendChild(buildWikiBlock(v));
+    else content.appendChild(U.el("p", { class: "tp-wiki-missing", text: t("reveal.wikiMissing") }));
+
+    el.infoSheetTitle.textContent = fullName;
+    placePrevCard(content, buildPrevStrip(result, cls));
+  }
+
+  /** 宽屏：内容直接铺在侧栏里；紧凑屏：侧栏只放一行摘要，全套塞进详情弹层 */
+  function placePrevCard(content, strip) {
+    if (isCompact()) {
+      el.prevCard.classList.add("tp-prev-strip");
+      el.prevCard.appendChild(strip);
+      el.infoSheetBody.appendChild(content);
+    } else {
+      el.prevCard.appendChild(content);
+    }
   }
 
   function buildWikiBlock(v) {
@@ -1088,7 +1169,8 @@
       "scopeGroupChips", "scopeTypeChips", "scopePresets", "configSummary",
       "homeRegionCount", "langSelect", "btnSettings", "btnSettingsClose", "settingsOverlay",
       "settingsBody", "btnRestart", "btnHome", "btnQuit", "toast", "summaryBody",
-      "confirmOverlay", "confirmBody", "btnConfirmStay", "btnConfirmLeave"
+      "confirmOverlay", "confirmBody", "btnConfirmStay", "btnConfirmLeave",
+      "scopeTip", "infoSheet", "infoSheetTitle", "infoSheetBody", "btnInfoSheetClose"
     ].forEach(function (id) { el[id] = document.getElementById(id); });
   }
 
@@ -1101,6 +1183,15 @@
     el.btnQuit.addEventListener("click", requestHome);
     el.btnConfirmStay.addEventListener("click", function () { dismissConfirm(true); });
     el.btnConfirmLeave.addEventListener("click", function () { dismissConfirm(false); });
+    el.btnInfoSheetClose.addEventListener("click", function () { hideOverlay(el.infoSheet); });
+    el.prevCard.addEventListener("click", function () {
+      if (!isCompact()) return;
+      if (!el.infoSheetBody.firstChild) return;
+      showOverlay(el.infoSheet);
+    });
+    el.prevCard.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); el.prevCard.click(); }
+    });
     el.btnZoomIn.addEventListener("click", function () { state.mapView && state.mapView.zoomIn(); });
     el.btnZoomOut.addEventListener("click", function () { state.mapView && state.mapView.zoomOut(); });
     el.btnZoomReset.addEventListener("click", function () { state.mapView && state.mapView.resetView(); });
@@ -1108,10 +1199,11 @@
     el.btnHome.addEventListener("click", function () { showScreen("home"); buildHome(); });
 
     document.addEventListener("keydown", function (e) {
-      var overlayOpen = !el.settingsOverlay.hidden || !el.confirmOverlay.hidden;
+      var overlayOpen = !el.settingsOverlay.hidden || !el.confirmOverlay.hidden || !el.infoSheet.hidden;
       if (overlayOpen) {
         if (e.key === "Escape") {
           if (!el.confirmOverlay.hidden) { dismissConfirm(true); return; }
+          if (!el.infoSheet.hidden) { hideOverlay(el.infoSheet); return; }
           hideOverlay(el.settingsOverlay);
         }
         return;
@@ -1145,12 +1237,20 @@
     T.i18n.onChange(refreshForLocale);
     document.documentElement.classList.toggle("tp-reduce-motion", !settings.motion);
 
+    trackViewportHeight();
     buildLangSelect();
     applyI18n();
     buildHome();
     buildSettings();
     bind();
     showScreen("home");
+
+    // 横竖屏切换 / 窗口尺寸变化时，摘要行和内容要重新落位
+    var onResize = U.debounce(function () {
+      if (state.session) renderPrevCard(state.lastResult);
+      buildHome();
+    }, 200);
+    global.addEventListener("resize", onResize);
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);

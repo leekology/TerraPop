@@ -124,6 +124,7 @@ locales/*  ──┘
   .tp-progress-bar      进度
   .tp-prev              上一题卡片：flex: 0 1 var(--prev-h)（232px）、内部滚动
                         （第一题显示玩法说明）
+                        紧凑模式下变成 .tp-prev-strip：只留一行，内容塞进 #infoSheet 抽屉
   .tp-current           当前题：固定高度 --block-h（312px）、margin-top: auto 钉在底部
     .tp-current-head    已知信息（32px）+ 题面（32px，22px 加粗）
     .tp-hints           提示（26px，没有提示也占位，避免跳动）
@@ -134,6 +135,11 @@ locales/*  ──┘
 所以作答区的屏幕坐标在整局里完全不变（上一题卡片内容长短都影响不到它）；
 端到端测试会在连续 6 题里断言这个坐标逐像素一致。
 短视口（`max-height: 760px / 680px`）会按档位调小 `--block-h` 与 `--prev-h`，保证不溢出。
+
+**紧凑模式**（`max-width: 860px` 或 `max-height: 560px`）另起一套：
+`html/body` 禁止滚动，答题屏高度写成 `calc(var(--vvh) - 顶栏)`，
+而 `--vvh` 由 `visualViewport.height` 实时写入（`js/app.js` 的 `trackViewportHeight()`）——
+软键盘弹起时地图（flex:1）自己缩，作答区不会被盖住。JS 侧的判断是 `isCompact()`，与 CSS 用同一个断点。
 
 ### `TERRAPOP.countries.cn`（`data/cn.js`）
 

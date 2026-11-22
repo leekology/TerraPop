@@ -597,16 +597,51 @@
     var pinchStart = null;
     var drag = null;
 
+    // 手机防误触：触摸时单指按下先进入「待定」，按住 300ms 才允许拖地图；
+    // 这 300ms 里指头快速滑动就当成「看地图」，既不拖也不算点击。鼠标不受影响，按下即可拖。
+    var LONG_PRESS_MS = 300;      // 长按判定时长
+    var LONG_PRESS_MOVE = 8;      // 待定期间允许的抖动；超过就放弃本次拖动/点击
+    var pressTimer = null;        // 待定定时器
+
+    function clearPressTimer() {
+      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+    }
+
+    /** 长按到点：真正进入「可以拖」的状态，给一记轻震 + class 提示 */
+    function armDrag() {
+      pressTimer = null;
+      if (!drag || drag.ready || drag.moved || drag.cancelled) return;
+      drag.ready = true;
+      try {
+        if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(12);
+      } catch (err) {}
+      svg.classList.add("tp-drag-ready");
+    }
+
     svg.addEventListener("pointerdown", function (e) {
       if (e.pointerType === "mouse" && e.button !== 0) return;
       pointers[e.pointerId] = { x: e.clientX, y: e.clientY };
       var ids = Object.keys(pointers);
-      if (ids.length === 2) {
-        var a = pointers[ids[0]], b = pointers[ids[1]];
-        pinchStart = { dist: Math.hypot(a.x - b.x, a.y - b.y), scale: state.scale };
+      if (ids.length >= 2) {
+        // 双指：不等长按，立刻进入缩放
+        clearPressTimer();
         drag = null;
+        if (ids.length === 2) {
+          var a = pointers[ids[0]], b = pointers[ids[1]];
+          pinchStart = { dist: Math.hypot(a.x - b.x, a.y - b.y), scale: state.scale };
+        }
       } else {
-        drag = { x: e.clientX, y: e.clientY, moved: false };
+        var isTouch = e.pointerType === "touch";
+        drag = {
+          sx: e.clientX, sy: e.clientY,   // 按下起点（判抖动用）
+          x: e.clientX, y: e.clientY,     // 上一次位置（算平移增量用）
+          moved: false, cancelled: false,
+          ready: !isTouch                 // 鼠标按下即可拖；触摸要等长按到点
+        };
+        if (isTouch) {
+          clearPressTimer();
+          pressTimer = setTimeout(armDrag, LONG_PRESS_MS);
+        }
       }
       try { svg.setPointerCapture(e.pointerId); } catch (err) {}
     });
@@ -626,26 +661,41 @@
         return;
       }
 
-      if (drag) {
-        var dx = e.clientX - drag.x, dy = e.clientY - drag.y;
-        if (!drag.moved && Math.hypot(dx, dy) > 4) drag.moved = true;
-        if (drag.moved) {
-          var rect = svg.getBoundingClientRect();
-          var s = Math.min(rect.width / W, rect.height / H) || 1;
-          state.tx += dx / s;
-          state.ty += dy / s;
-          clampView();
-          applyTransform();
+      if (!drag) return;
+
+      if (!drag.ready) {
+        // 触摸待定中：超过阈值说明用户是想滑，取消长按，本次既不拖也不算点击
+        if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > LONG_PRESS_MOVE) {
+          clearPressTimer();
+          drag.moved = true;
+          drag.cancelled = true;
+        } else {
           drag.x = e.clientX; drag.y = e.clientY;
         }
+        return;
+      }
+
+      var dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+      if (!drag.moved && Math.hypot(dx, dy) > 4) drag.moved = true;
+      if (drag.moved) {
+        var rect = svg.getBoundingClientRect();
+        var s = Math.min(rect.width / W, rect.height / H) || 1;
+        state.tx += dx / s;
+        state.ty += dy / s;
+        clampView();
+        applyTransform();
+        drag.x = e.clientX; drag.y = e.clientY;
       }
     });
 
     function endPointer(e) {
       delete pointers[e.pointerId];
       if (Object.keys(pointers).length < 2) pinchStart = null;
+      clearPressTimer();
+      svg.classList.remove("tp-drag-ready");
       var wasDrag = drag && drag.moved;
       drag = null;
+      // 锁定（不在选省）时只是不能选省，待定/拖拽逻辑照旧
       if (e.type === "pointerup" && !wasDrag && !state.locked) {
         var id = regionAt(e.clientX, e.clientY);
         if (id) onSelect(id, { clientX: e.clientX, clientY: e.clientY });
@@ -653,7 +703,13 @@
     }
 
     svg.addEventListener("pointerup", endPointer);
-    svg.addEventListener("pointercancel", function (e) { delete pointers[e.pointerId]; drag = null; pinchStart = null; });
+    svg.addEventListener("pointercancel", function (e) {
+      delete pointers[e.pointerId];
+      clearPressTimer();
+      svg.classList.remove("tp-drag-ready");
+      drag = null;
+      pinchStart = null;
+    });
 
     svg.addEventListener("wheel", function (e) {
       e.preventDefault();
@@ -682,6 +738,12 @@
       regionPaths: regionPaths,
       regionAt: regionAt,
       distance: distance,
+
+      /** 当前缩放倍数（测试用） */
+      getScale: function () { return state.scale; },
+
+      /** 是否已按住到点、可以拖地图（测试用） */
+      isDragging: function () { return !!(drag && drag.ready); },
 
       setLocale: function (l) { locale = l; refreshTexts(); buildTerrainLabels(); },
 
@@ -775,11 +837,12 @@
 
       clearMarks: function () { U.clear(gOverlay); U.clear(gLabels); api.setSpot(null); syncMagMark(null); },
 
-      focusRegion: function (id) {
+      /** 聚焦某个省；scale 可选（默认 2.4），手机上可传更大的倍数把高亮省放大看清楚 */
+      focusRegion: function (id, scale) {
         var r = regionById[id];
         if (!r) return;
         var c = r.label || r.center;
-        state.scale = 2.4;
+        state.scale = typeof scale === "number" ? scale : 2.4;
         state.tx = W / 2 - c[0] * state.scale;
         state.ty = H / 2 - c[1] * state.scale;
         clampView();

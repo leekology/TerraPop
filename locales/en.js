@@ -38,6 +38,7 @@ window.TERRAPOP.locales.en = {
   "scope.selectAllGroups": "Select all regions",
   "scope.clearGroups": "Clear regions",
   "scope.empty": "No regions are selected — tick at least one region group.",
+  "scope.mobileLocateTip": "Locating on a phone means a tiny map — tick a single region group for easier tapping.",
 
   "group.north": "North China",
   "group.northeast": "Northeast",
@@ -57,9 +58,6 @@ window.TERRAPOP.locales.en = {
   "style.choice4": "4 choices",
   "style.choice5": "5 choices",
   "style.locate": "Locate",
-  "style.easy": "easy",
-  "style.normal": "normal",
-  "style.hard": "hard",
 
   "term.capital": "capital",
   "term.seat": "seat",
@@ -72,6 +70,7 @@ window.TERRAPOP.locales.en = {
 
   "question.counter": "Question {n}",
   "question.prompt": "What is its {asked}?",
+  "question.promptPrefix": "What is its",
   "question.askLocation": "Click the map to answer",
   "question.knownLocation": "Circled on the map",
   "question.hintFirst": "Starts with: {v}",
@@ -92,6 +91,8 @@ window.TERRAPOP.locales.en = {
   "prev.yourAnswer": "You answered",
   "prev.unknown": "Not answered",
   "prev.requeued": "Wrong — this one will come around again",
+  "prev.requeuedShort": "again later",
+  "prev.tapForMore": "details ›",
 
   "action.submit": "OK",
   "action.skip": "Skip",
@@ -173,6 +174,7 @@ window.TERRAPOP.locales.en = {
   "home.howto.body": "You get one fact (full name / abbreviation / capital / location) and only have to supply another. Location questions are answered by clicking the map; the rest can be typed or chosen. Typing accepts pinyin and pinyin initials, and judges itself as soon as the input is unambiguous. Every answer reveals all four facts — nothing moves and nothing blocks, so the longer your combo the higher you score.",
   "home.regionCount": "This round covers {n} province-level regions",
 
+  "map.holdToPan": "Map: press and hold 0.3s, then drag to pan",
   "map.insetSouthChinaSea": "South China Sea Islands",
   "map.insetHongKongMacao": "Hong Kong · Macao",
 

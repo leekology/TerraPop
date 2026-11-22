@@ -88,6 +88,7 @@
         </div>
         <div class="tp-chip-row" id="scopePresets"></div>
         <p class="tp-hint-line" id="homeRegionCount"></p>
+        <p class="tp-hint-line tp-scope-tip" id="scopeTip" hidden></p>
       </div>
 
       <div class="tp-card tp-card-plain">
@@ -187,6 +188,17 @@
 </div>
 
 <div class="tp-toast" id="toast" hidden></div>
+
+<!-- ── 移动端「上一题」详情（小屏只留一行结果，点开看全套）──── -->
+<div class="tp-overlay tp-sheet" id="infoSheet" hidden>
+  <div class="tp-modal" role="dialog" aria-modal="true" aria-labelledby="infoSheetTitle">
+    <div class="tp-modal-head">
+      <h2 id="infoSheetTitle"></h2>
+      <button type="button" class="tp-icon-btn tp-close" id="btnInfoSheetClose" aria-label="close">✕</button>
+    </div>
+    <div class="tp-modal-body" id="infoSheetBody"></div>
+  </div>
+</div>
 
 <!-- ─────────────────────────────────────────────────────────
      按依赖顺序加载；全部为传统脚本，file:// 直接可用。

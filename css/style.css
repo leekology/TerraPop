@@ -611,7 +611,9 @@ body {
   .tp-panel { overflow-y: auto; }
 }
 
-@media (max-width: 1040px) {
+/* 上下堆叠只在真正窄的时候用；1024 这类平板横屏保持左右分栏，
+   否则上一题卡片会被挤到屏幕外 */
+@media (max-width: 900px) {
   .tp-play { grid-template-columns: 1fr; height: auto; min-height: 0; }
   .tp-map-pane { height: 50vh; min-height: 300px; }
   .tp-panel { overflow: visible; }
@@ -654,7 +656,7 @@ body {
 /* ══════════════════════════════════════════════════════════════
    紧凑模式（手机 / 矮窗口）：整屏不滚动，地图自适应让位给输入法
    ══════════════════════════════════════════════════════════════ */
-@media (max-width: 860px), (max-height: 560px) {
+@media (max-width: 900px), (max-height: 560px) {
   :root {
     --topbar-h: 46px;
     --block-h:  218px;   /* 已知 58 + 提示 20 + 作答 128 + 间距 12 */
@@ -706,6 +708,10 @@ body {
   .tp-prev-strip {
     flex: 0 0 auto; min-height: var(--prev-h); max-height: var(--prev-h);
     padding: 6px 10px; display: flex; align-items: center;
+  }
+  /* 紧凑布局里如果宽高都够（竖屏平板、大屏手机横放），上一题照样展开成完整卡片 */
+  html.tp-roomy-prev .tp-prev {
+    flex: 0 0 auto; height: 208px; min-height: 0; max-height: none;
   }
   .tp-prev-strip .tp-strip { width: 100%; }
 

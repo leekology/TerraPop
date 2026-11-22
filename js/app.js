@@ -217,9 +217,28 @@
   }
 
   // ── 紧凑（手机）模式 ─────────────────────────────────────────
-  var COMPACT_MQ = "(max-width: 860px), (max-height: 560px)";
+  var COMPACT_MQ = "(max-width: 900px), (max-height: 560px)";
   function isCompact() {
     return !!(global.matchMedia && global.matchMedia(COMPACT_MQ).matches);
+  }
+
+  function viewportSize() {
+    var vv = global.visualViewport;
+    return {
+      w: Math.round((vv && vv.width) || global.innerWidth || 0),
+      h: Math.round((vv && vv.height) || global.innerHeight || 0)
+    };
+  }
+
+  /**
+   * 上一题要不要展开成完整卡片。
+   * 桌面当然要；紧凑布局下如果**宽高都够**（竖屏平板、大屏手机横放等）也给完整卡片，
+   * 只有真的挤（手机竖屏、矮窗口）才退化成一行摘要。
+   */
+  function roomyPrev() {
+    if (!isCompact()) return true;
+    var s = viewportSize();
+    return s.w >= 600 && s.h >= 700;
   }
 
   /**
@@ -960,12 +979,13 @@
 
   /** 宽屏：内容直接铺在侧栏里；紧凑屏：侧栏只放一行摘要，全套塞进详情弹层 */
   function placePrevCard(content, strip) {
-    if (isCompact()) {
+    document.documentElement.classList.toggle("tp-roomy-prev", roomyPrev());
+    if (roomyPrev()) {
+      el.prevCard.appendChild(content);
+    } else {
       el.prevCard.classList.add("tp-prev-strip");
       el.prevCard.appendChild(strip);
       el.infoSheetBody.appendChild(content);
-    } else {
-      el.prevCard.appendChild(content);
     }
   }
 
@@ -1243,7 +1263,7 @@
     el.btnConfirmLeave.addEventListener("click", function () { dismissConfirm(false); });
     el.btnInfoSheetClose.addEventListener("click", function () { hideOverlay(el.infoSheet); });
     el.prevCard.addEventListener("click", function () {
-      if (!isCompact()) return;
+      if (!isCompact() || roomyPrev()) return;   // 已经展开成完整卡片了，不用弹
       if (!el.infoSheetBody.firstChild) return;
       showOverlay(el.infoSheet);
     });

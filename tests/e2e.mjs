@@ -1069,6 +1069,59 @@ check("横屏选项区没有滚动条", await page.evaluate(() => {
 check("横屏下一屏仍然放得下", await page.evaluate(() =>
   document.documentElement.scrollHeight <= document.documentElement.clientHeight + 2));
 
+// ── 平板：空间够的时候上一题要展开成完整卡片 ──
+await leaveGame();
+await page.setViewportSize({ width: 1024, height: 768 });
+await page.waitForTimeout(450);
+await setScopeAll();
+await pickChip("modeChips", "random");
+await pickChip("knownChips", "location");
+await pickChip("askedChips", "full");
+await pickChip("styleChips", "text");
+await page.click("#btnStart");
+await page.waitForTimeout(500);
+const tabLand = await page.evaluate(() => {
+  const map = document.querySelector(".tp-map-pane").getBoundingClientRect();
+  const panel = document.querySelector(".tp-panel").getBoundingClientRect();
+  const prev = document.getElementById("prevCard");
+  return {
+    sideBySide: Math.abs(map.top - panel.top) < 10,
+    strip: prev.classList.contains("tp-prev-strip"),
+    prevH: Math.round(prev.getBoundingClientRect().height),
+    mapH: Math.round(map.height)
+  };
+});
+check("平板横屏 1024×768：左右分栏（不是上下堆叠）", tabLand.sideBySide, JSON.stringify(tabLand));
+check("平板横屏：上一题是完整卡片，不是一行摘要",
+  !tabLand.strip && tabLand.prevH >= 150, `${tabLand.prevH}px`);
+await page.screenshot({ path: path.join(shots, "14-tablet-landscape.png") });
+
+// 竖屏平板 768×1024：走紧凑布局，但宽高都够 → 仍旧完整卡片
+await leaveGame();
+await page.setViewportSize({ width: 768, height: 1024 });
+await page.waitForTimeout(450);
+await page.click("#btnStart");
+await page.waitForTimeout(500);
+const tabPort = await page.evaluate(() => {
+  const prev = document.getElementById("prevCard");
+  return {
+    compact: window.matchMedia("(max-width: 900px), (max-height: 560px)").matches,
+    strip: prev.classList.contains("tp-prev-strip"),
+    prevH: Math.round(prev.getBoundingClientRect().height),
+    mapH: Math.round(document.querySelector(".tp-map-pane").getBoundingClientRect().height)
+  };
+});
+check("竖屏平板 768×1024：紧凑布局但仍然展示完整上一题卡片",
+  tabPort.compact && !tabPort.strip && tabPort.prevH >= 150, JSON.stringify(tabPort));
+check("竖屏平板：地图还留着足够的高度", tabPort.mapH >= 240, `${tabPort.mapH}px`);
+await page.screenshot({ path: path.join(shots, "14-tablet-portrait.png") });
+
+// 手机竖屏仍旧是一行摘要
+await page.setViewportSize({ width: 390, height: 844 });
+await page.waitForTimeout(450);
+check("手机 390×844：退回一行摘要",
+  await page.evaluate(() => document.getElementById("prevCard").classList.contains("tp-prev-strip")));
+
 // ── 15. 无报错 ───────────────────────────────────────────────
 section("15. 运行期无报错");
 check("没有 console error / pageerror / 资源加载失败", errors.length === 0, errors.slice(0, 4).join(" | "));
